@@ -1,0 +1,4 @@
+mkdir -p playground/$1/$2
+touch playground/$1/$2/main.cpp
+echo "g++ --std=c++17 \$(cat conanbuildinfo.args 2> /dev/null) main.cpp -o main.out" > playground/$1/$2/build
+chmod +x playground/$1/$2/build

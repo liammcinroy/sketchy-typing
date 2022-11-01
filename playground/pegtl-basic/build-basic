@@ -1,1 +1,0 @@
-g++ --std=c++17 -I/Users/williammcinroy/.conan/data/taocpp-pegtl/3.2.7/_/_/package/5ab84d6acfe1f23c4fae0ab88f26e3a396351ac9/include basic.cpp -o basic.out
