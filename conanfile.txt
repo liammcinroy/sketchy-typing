@@ -1,0 +1,8 @@
+[requires]
+boost/1.80
+taocpp-pegtl/3.2.7
+
+[generators]
+cmake
+
+[options]

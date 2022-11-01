@@ -1,0 +1,6 @@
+[requires]
+taocpp-pegtl/3.2.7
+
+[generators]
+compiler_args
+
