@@ -15,9 +15,9 @@ struct f<0, T0, Ts...> {
   using type = T0;
 };
 
-template<size_t i, typename... Ts>
+template <size_t i, typename... Ts>
 using at = typename f<i, Ts...>::type;
-}  // namespace at
+}  // namespace get
 
 namespace simplices {
 
