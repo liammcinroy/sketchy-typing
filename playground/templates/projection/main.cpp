@@ -49,23 +49,33 @@ struct ImplTs {
     using type = T<_Ts..., _Ts2...>;
   };
 
+  template <size_t i>
+  using at2 = void;
+
   // TODO: maybe make `apply` enhance to `T` with `unapply`?
   // make this whole idea a lil more rigorous.
 };
 
 //// as a dumb test of concepts, I just want to check that this does in
-//// fact compile. (Spoiler: it doesn't).
+//// fact compile. (Spoiler: it doesn't if overspecified?).
 namespace implts::test::concepts {
 template <typename T>
 concept ImplTsConcept = requires {
-  typename T::template at<size_t>;
+  // typename T::template at<size_t>;  <-- doesn't work
+  T::template at<size_t>;  // does work!
+
+  { T::n } -> std::same_as<const size_t>;  // does work!
+
+  // but so far, we don't express the constraint that ::at is only
+  // defined for 0 <= i < n.
+  // perhaps we can do this with some ``projective'' types?
 };
 
 template <ImplTsConcept T>
 struct testConcept {};
 
-// ok -- weirdly enough this doesn't work... come back to it later I guess
-// using test1 = testConcept<ImplTs<int>>;
+using test1 = testConcept<ImplTs<int>>;
+
 }  // namespace implts::test::concepts
 
 //// anyways, back to projection (TODO: would be nice to enforce concept, but
@@ -118,8 +128,8 @@ template <template <typename...> class constr,
           typename _Ts2,
           size_t counter>
 struct pairs {
-  using type =
-      typename pairs<constr, _Ts1, _Ts2, counter - 1>::type::template postapply<
+  using type = typename pairs<constr, _Ts1, _Ts2, counter - 1>::type::
+      template postapply<
           constr<typename _Ts1::template at<counter / _Ts1::n>,
                  typename _Ts2::template at<counter % _Ts1::n>>>;
 };
@@ -132,8 +142,102 @@ struct pairs<constr, _Ts1, _Ts2, 0> {
 }  // namespace impl
 
 template <template <typename...> class constr, typename _Ts1, typename _Ts2>
-using pairs = typename impl::pairs<constr, _Ts1, _Ts2, _Ts1::n * _Ts2::n>::type;
+using pairs =
+    typename impl::pairs<constr, _Ts1, _Ts2, _Ts1::n * _Ts2::n>::type;
 }  // namespace brute::pairs
+
+template <typename _Ts1,
+          typename _Ts2,
+          template <typename...> class constr = ImplTs>
+using brute_pairs = typename brute::pairs::pairs<constr, _Ts1, _Ts2>;
+
+//// this is a less dumb test of concepts... one which extends `ImplTsConcept`
+namespace implts::test::concepts {
+
+namespace boolevals {
+
+template <typename T>
+struct non_void {
+  // note that
+  // static constexpr bool value = !requires(std::same_as<T, bool>);
+  // doesn't work, but the below does!
+  static constexpr bool value = !std::is_same_v<T, bool>;
+};
+
+template <typename T>
+constexpr bool non_void_v() {
+  return non_void<T>::value;
+}
+
+namespace allsat {
+
+template <typename _Ts, template <typename> class cond, size_t idx>
+struct all_sat {
+  static constexpr bool value = (cond<typename _Ts::template at<idx>>::value)
+                                    ? all_sat<_Ts, cond, idx - 1>::value
+                                    : false;
+};
+
+template <typename _Ts, template <typename> class cond>
+struct all_sat<_Ts, cond, 0> {
+  static constexpr bool value =
+      (_Ts::n > 0) ? cond<typename _Ts::template at<0>>::value : true;
+};
+
+}  // namespace allsat
+
+template <typename _Ts, template <typename> class cond>
+constexpr bool all_sat_v() {
+  return allsat::all_sat<_Ts, cond, _Ts::n - 1>::value;
+}
+
+template <typename _Ts>
+constexpr bool all_non_void() {
+  return all_sat_v<_Ts, non_void>();
+}
+
+}  // namespace boolevals
+
+template <typename T>
+concept ImplTsConceptExt = requires {
+  requires ImplTsConcept<T>;  // has ::template at<size_t> and ::n -> size_t.
+
+  // but so far, we don't express the constraint that ::at is only
+  // defined for 0 <= i < n.
+  // Let's say we impose that ``defined'' means ``not void'', then (?):
+  requires(boolevals::all_non_void<T>());
+};
+
+template <typename T>
+concept HasValue = requires {
+  { T::value } -> std::same_as<const bool>;
+};
+
+template <HasValue T>
+struct testHasValueNonVoid {};
+
+using test2 = testHasValueNonVoid<boolevals::non_void<int>>;
+
+template <typename T>
+concept HasValueAndTrue = requires {
+  requires HasValue<T>;
+  requires(T::value);
+};
+
+template <HasValueAndTrue T>
+struct testHasValueAndTrueNonVoid {};
+
+using test3 = testHasValueAndTrueNonVoid<boolevals::non_void<int>>;
+
+template <ImplTsConceptExt T>
+struct testConceptExt {};
+
+using test4 = testConceptExt<ImplTs<int>>;
+
+// this shouldn't work
+using test5 = testConceptExt<ImplTs<void>>;
+
+}  // namespace implts::test::concepts
 
 }  // namespace templates::projection
 
