@@ -37,7 +37,7 @@ struct ImplTs {
 
   template <size_t i>
   using at = typename std::
-      conditional<0 <= i && i <= sizeof...(_Ts), get::at<i, _Ts...>, void>;
+      conditional_t<0 <= i && i <= n - 1, get::at<i, _Ts...>, void>;
 
   template <template <typename...> class T, typename... _Ts2>
   struct postapply {
@@ -48,9 +48,6 @@ struct ImplTs {
   struct preapply {
     using type = T<_Ts..., _Ts2...>;
   };
-
-  template <size_t i>
-  using at2 = void;
 
   // TODO: maybe make `apply` enhance to `T` with `unapply`?
   // make this whole idea a lil more rigorous.
@@ -161,7 +158,7 @@ struct non_void {
   // note that
   // static constexpr bool value = !requires(std::same_as<T, bool>);
   // doesn't work, but the below does!
-  static constexpr bool value = !std::is_same_v<T, bool>;
+  static constexpr bool value = !std::is_same_v<T, void>;
 };
 
 template <typename T>
@@ -228,14 +225,18 @@ template <HasValueAndTrue T>
 struct testHasValueAndTrueNonVoid {};
 
 using test3 = testHasValueAndTrueNonVoid<boolevals::non_void<int>>;
+// this shouldn't work, and indeed it doesn't
+// using test4 = testHasValueAndTrueNonVoid<boolevals::non_void<void>>;
+// this shouldn't work, and indeed it doesn't
+// using test5 = testHasValueAndTrueNonVoid<typename ImplTs<void>::at<0>>;
 
 template <ImplTsConceptExt T>
 struct testConceptExt {};
 
-using test4 = testConceptExt<ImplTs<int>>;
+using test6 = testConceptExt<ImplTs<int>>;
 
-// this shouldn't work
-using test5 = testConceptExt<ImplTs<void>>;
+// this shouldn't work, and indeed it doesn't
+// using test7 = testConceptExt<ImplTs<void>>;
 
 }  // namespace implts::test::concepts
 

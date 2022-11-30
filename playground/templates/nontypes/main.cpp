@@ -15,11 +15,12 @@ struct Ext {
 template <typename T>
 Ext(T) -> Ext<T>;
 
+// requires templates
 // template <Ext e>
-// struct X {};
+// struct X1 {};
 
 template <template<typename T> class TExt>
-struct X {};
+struct X2 {};
 
 }  // namespace templates::nontypes
 
