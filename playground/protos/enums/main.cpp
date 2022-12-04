@@ -156,9 +156,9 @@ namespace simplicial {
 // Condition (i) of `identities<...>()`
 namespace condition_i {
 
-template <size_t n, typename TruncSimpSet>
+template <size_t n, typename simpset>
 constexpr bool _proper_dimensions() {
-  return TruncSimpSet::Set<n>::_dim == n;
+  return simpset::template Set<n>::_dim == n;
 }
 
 }  // namespace condition_i
@@ -167,54 +167,133 @@ constexpr bool _proper_dimensions() {
 namespace condition_ii {
 
 template <typename simplex, size_t _face_codomain_max, size_t face_idx>
-constexpr bool _impl_face_codomains() {
-  return (simplex::face<face_idx> < _face_codomain_max)
-             ? _impl_face_codomains<simplex,
-                                    _face_codomain_max,
-                                    face_idx - 1>()
-             : false;
-}
+struct _impl_face_codomains {
+  static constexpr bool value =
+      (simplex::template face<face_idx>::value <= _face_codomain_max - 1)
+          ? _impl_face_codomains<simplex, _face_codomain_max, face_idx - 1>::
+                value
+          : false;
+};
 
 template <typename simplex, size_t _face_codomain_max>
-constexpr bool _impl_face_codomains<simplex, _face_codomain_max, 0>() {
-  return simplex::face<0> < _face_codomain_max;
-}
+struct _impl_face_codomains<simplex, _face_codomain_max, 0> {
+  static constexpr bool value =
+      simplex::template face<0>::value <= _face_codomain_max - 1;
+};
 
 template <typename simplex, size_t _face_codomain_max>
 constexpr bool _face_codomains() {
-  return _impl_face_codomains<simplex, _face_codomain_max, simplex::_dim>();
+  return _impl_face_codomains<simplex, _face_codomain_max, simplex::_dim>::
+      value;
 }
 
-template <size_t n, typename TruncSimpSet, size_t simplex_idx>
-constexpr bool _impl_codomains() {
-  using set = typename TruncSimpSet::Set<n>;
-  using simplex = typename Set::materialize<(typename set::_)simplex_idx>;
-  return (_face_codomains<simplex, TruncSimpSet::Set<n - 1>::_n_primitives>())
-             ? _impl_codomains<n, TruncSimpSet, simplex_idx - 1>()
-             : false;
-}
+template <size_t n, typename simpset, size_t simplex_idx>
+struct _impl_codomains {
+  using set = typename simpset::template Set<n>;
+  using simplex =
+      typename set::template materialize<(typename set::_)simplex_idx>;
+  static constexpr bool value =
+      (_face_codomains<simplex, simpset::template Set<n - 1>::_n_primitives>())
+          ? _impl_codomains<n, simpset, simplex_idx - 1>::value
+          : false;
+};
 
-template <size_t n, typename TruncSimpSet>
-constexpr bool _impl_codomains<n, TruncSimpSet, 0>() {
-  using set = typename TruncSimpSet::Set<n>;
-  using simplex = typename Set::materialize<(typename set::_)simplex_idx>;
-  return _face_codomains<simplex, TruncSimpSet::Set<n - 1>::_n_primitives>();
-}
+template <size_t n, typename simpset>
+struct _impl_codomains<n, simpset, 0> {
+  using set = typename simpset::template Set<n>;
+  using simplex = typename set::template materialize<(typename set::_)0>;
+  static constexpr bool value =
+      _face_codomains<simplex, simpset::template Set<n - 1>::_n_primitives>();
+};
 
-// TODO: handle edge cases around `n`...?
-template <size_t n, typename TruncSimpSet>
+template <size_t n, typename simpset>
 constexpr bool _codomains() {
-  return _impl_codomains<n,
-                         TruncSimpSet,
-                         TruncSimpSet::Set<n>::_n_primitives>();
+  return (n == 0)
+             ? true
+             : _impl_codomains<n,
+                               simpset,
+                               simpset::template Set<n>::_n_primitives>::value;
 }
 
 }  // namespace condition_ii
 
 // Condition (iii) of `identities<...>()`
 namespace condition_iii {
-  // TODO: looping, conditions around `n` are complicated...
+
+template <size_t n, typename simplex, typename simpset, size_t i, size_t j>
+struct _impl_simplex_degeneracies {
+  using lowerset = typename simpset::template Set<n - 1>;
+  static constexpr size_t newi = (i > 0) ? i - 1 : j - 2;
+  static constexpr size_t newj = (i > 0) ? j : j - 1;
+  static constexpr bool value =
+      (lowerset::template materialize<(
+           typename lowerset::_)j>::template face<i>::value ==
+       lowerset::template materialize<(
+           typename lowerset::_)i>::template face<j - 1>::value)
+          ? _impl_simplex_degeneracies<n, simplex, simpset, newi, newj>::value
+          : false;
+};
+
+template <size_t n, typename simplex, typename simpset>
+struct _impl_simplex_degeneracies<n, simplex, simpset, 0, 1> {
+  using lowerset = typename simpset::template Set<n - 1>;
+  static constexpr bool value =
+      lowerset::template materialize<(
+          typename lowerset::_)1>::template face<0>::value ==
+      lowerset::template materialize<(
+          typename lowerset::_)0>::template face<0>::value;
+};
+
+template <size_t n, typename simplex, typename simpset>
+constexpr bool _simplex_degeneracies() {
+  return (n <= 1) ? true
+                  : _impl_simplex_degeneracies<n, simplex, simpset, n - 1, n>::
+                        value;
+}
+
+template <size_t n, typename simpset, size_t simplex_idx>
+struct _impl_degeneracies {
+  using set = typename simpset::template Set<n>;
+  using simplex =
+      typename set::template materialize<(typename set::_)simplex_idx>;
+  static constexpr bool value =
+      (_simplex_degeneracies<n, simplex, simpset>())
+          ? _impl_degeneracies<n, simpset, simplex_idx - 1>::value
+          : false;
+};
+
+template <size_t n, typename simpset>
+struct _impl_degeneracies<n, simpset, 0> {
+  using set = typename simpset::template Set<n>;
+  using simplex = typename set::template materialize<(typename set::_)0>;
+  static constexpr bool value = _simplex_degeneracies<n, simplex, simpset>();
+};
+
+template <size_t n, typename simpset>
+constexpr bool _degeneracies() {
+  return _impl_degeneracies<n,
+                            simpset,
+                            simpset::template Set<n>::_n_primitives>::value;
+}
+
 }  // namespace condition_iii
+
+template<size_t _dim, typename simpset, size_t n>
+struct _impl_identities {
+  static constexpr bool value =
+    (condition_i::_proper_dimensions<n, simpset>() &&
+     condition_ii::_codomains<n, simpset>() &&
+     condition_iii::_degeneracies<n, simpset>()) ?
+    _impl_identities<_dim, simpset, n + 1>::value : false;
+};
+
+template<size_t _dim, typename simpset>
+struct _impl_identities<_dim, simpset, _dim> {
+  static constexpr bool value =
+    (condition_i::_proper_dimensions<_dim, simpset>() &&
+     condition_ii::_codomains<_dim, simpset>() &&
+     condition_iii::_degeneracies<_dim, simpset>());
+};
 
 // the `_TruncatedSimplicialSet` concept says that
 // each `typename TruncSimpSet::Set<size_t>` is `_SimplexSetEnum`.
@@ -235,10 +314,9 @@ namespace condition_iii {
 //         `0 <= i < j <= S::_dim` that
 //         `TruncSimpSet<n - 1>::materialize<S::face<j>>::face<i> ==
 //         `TruncSimpSet<n - 1>::materialize<S::face<i>>::face<j - 1>`.
-template <size_t _dim, typename TruncSimpSet>
+template <size_t _dim, typename simpset>
 constexpr bool identities() {
-  // TODO: link up and fix all the many many errors
-  return true;
+  return _impl_identities<_dim, simpset, 0>::value;
 }
 
 }  // namespace simplicial
