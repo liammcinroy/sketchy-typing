@@ -168,7 +168,7 @@ namespace condition_ii {
 template <typename simplex, size_t _face_codomain_max, size_t face_idx>
 struct _impl_face_codomains {
   static constexpr bool value =
-      (simplex::template face<face_idx>::value <= _face_codomain_max - 1)
+      (simplex::template face<face_idx>::value <= _face_codomain_max)
           ? _impl_face_codomains<simplex, _face_codomain_max, face_idx - 1>::
                 value
           : false;
@@ -177,7 +177,7 @@ struct _impl_face_codomains {
 template <typename simplex, size_t _face_codomain_max>
 struct _impl_face_codomains<simplex, _face_codomain_max, 0> {
   static constexpr bool value =
-      simplex::template face<0>::value <= _face_codomain_max - 1;
+      simplex::template face<0>::value <= _face_codomain_max;
 };
 
 template <typename simplex, size_t _face_codomain_max>
@@ -229,9 +229,11 @@ struct _impl_simplex_degeneracies {
   static constexpr size_t newj = (i > 0) ? j : j - 1;
   static constexpr bool value =
       (lowerset::template materialize<(
-           typename lowerset::_)j>::type::template face<i>::value ==
+           typename lowerset::_)simplex::template face<j>::value>::type::
+           template face<i>::value ==
        lowerset::template materialize<(
-           typename lowerset::_)i>::type::template face<j - 1>::value)
+           typename lowerset::_)simplex::template face<i>::value>::type::
+           template face<j - 1>::value)
           ? _impl_simplex_degeneracies<n, simplex, simpset, newi, newj>::value
           : false;
 };
@@ -241,9 +243,11 @@ struct _impl_simplex_degeneracies<n, simplex, simpset, 0, 1> {
   using lowerset = typename simpset::template Set<n - 1>;
   static constexpr bool value =
       lowerset::template materialize<(
-          typename lowerset::_)1>::type::template face<0>::value ==
-      lowerset::template materialize<(
-          typename lowerset::_)0>::type::template face<0>::value;
+          typename lowerset::_)simplex::template face<1>::value>::type::
+          template face<0>::value ==
+      lowerset::template materialize<
+          (typename lowerset::_)
+              simplex::template face<0>::value>::type::template face<0>::value;
 };
 
 template <size_t n, typename simplex, typename simpset>
@@ -292,18 +296,17 @@ struct _degeneracies<0, simpset> {
 // Identities, dims passing for 1-simplex, codomains failing
 
 template <size_t _dim, typename simpset, size_t n>
-requires(condition_i::_proper_dimensions<n, simpset>::value &&
-             condition_ii::_codomains<n, simpset>::value &&
-                 condition_iii::_degeneracies<n, simpset>::value)
-struct _impl_identities {
+requires(condition_i::_proper_dimensions<n, simpset>::value&&
+             condition_ii::_codomains<n, simpset>::value&& condition_iii::
+                 _degeneracies<n, simpset>::value) struct _impl_identities {
   static constexpr bool value = _impl_identities<_dim, simpset, n + 1>::value;
 };
 
 template <size_t _dim, typename simpset>
-requires(condition_i::_proper_dimensions<_dim, simpset>::value &&
-             condition_ii::_codomains<_dim, simpset>::value &&
-                 condition_iii::_degeneracies<_dim, simpset>::value)
-struct _impl_identities<_dim, simpset, _dim> {
+requires(condition_i::_proper_dimensions<_dim, simpset>::value&&
+             condition_ii::_codomains<_dim, simpset>::value&&
+                 condition_iii::_degeneracies<_dim, simpset>::
+                     value) struct _impl_identities<_dim, simpset, _dim> {
   static constexpr bool value = true;
 };
 
@@ -517,7 +520,7 @@ struct Standard2Simplex {
   struct Set<2> {
     static constexpr size_t _dim = 2;
 
-    static constexpr size_t _n_primitives = 1;
+    static constexpr size_t _n_primitives = 0;
 
     enum _ { gfcomp };
 
@@ -536,12 +539,12 @@ struct Standard2Simplex {
 
       template <>
       struct face<1> {
-        static constexpr Set<1>::_ value = Set<1>::_::g;
+        static constexpr Set<1>::_ value = Set<1>::_::gf;
       };
 
       template <>
       struct face<2> {
-        static constexpr Set<1>::_ value = Set<1>::_::gf;
+        static constexpr Set<1>::_ value = Set<1>::_::g;
       };
     };
 
@@ -559,14 +562,51 @@ struct RequiresTruncated {
 
 using testStandard2Simplex0Truncated = RequiresTruncated<0, Standard2Simplex>;
 using testStandard2Simplex1Truncated = RequiresTruncated<1, Standard2Simplex>;
-// using testStandard2Simplex2Truncated = RequiresTruncated<2,
-// Standard2Simplex>;
+using testStandard2Simplex2Truncated = RequiresTruncated<2, Standard2Simplex>;
 
 }  // namespace simpsets::tests
 
 }  // namespace protos::enums
 
 int main(int argc, char* argv[]) {
-  std::cout << "compiled!" << std::endl;
+  using simpset = protos::enums::simpsets::tests::Standard2Simplex;
+  using simplexset0 = typename simpset::template Set<0>;
+  auto asString0 = [](const simplexset0::_ s) {
+    if (s == simplexset0::_::A) return "A";
+    if (s == simplexset0::_::B)
+      return "B";
+    else
+      return "C";
+  };
+  using simplexset1 = typename simpset::template Set<1>;
+  auto asString1 = [](const simplexset1::_ s) {
+    if (s == simplexset1::_::f) return "f : A -> B";
+    if (s == simplexset1::_::g)
+      return "g : B -> C";
+    else
+      return "gf : A -> C";
+  };
+
+  using simplex2 = typename simpset::template Set<2>::materialize<(
+      typename simpset::template Set<2>::_)0>::type;
+
+  std::cout << "2 simplex degeneraceis:" << std::endl;
+#define print_degeneracies(I, J, it)                                          \
+  constexpr size_t i##it = I;                                                 \
+  constexpr size_t j##it = J;                                                 \
+  std::cout                                                                   \
+      << "\ti = " << i##it << ", j = " << j##it << ": "                       \
+      << asString0(simplexset1::template materialize<simplex2::template face< \
+                       j##it>::value>::type::template face<i##it>::value)     \
+      << ";\tj = " << j##it - 1 << ", i = " << i##it << ": "                  \
+      << asString0(simplexset1::template materialize<simplex2::template face< \
+                       i##it>::value>::type::template face<j##it - 1>::value) \
+      << std::endl;
+
+  print_degeneracies(1, 2, 0) print_degeneracies(0, 2, 1)
+          print_degeneracies(0, 1, 2)
+
+              std::cout
+      << "compiled!" << std::endl;
   return 0;
 }
