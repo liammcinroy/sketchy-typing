@@ -16,6 +16,113 @@ namespace protos::limits {
 
 namespace simpsets {
 
+template <size_t _dim, typename s>
+concept _Simplex = (
+    requires { _dim <= 0; } ||
+    requires {
+      // the dimension of the simplex.
+      requires(s::_dim == _dim);
+
+      // we don't require the degeneracies here, that's handled in the
+      // `_SimplicialSet`.
+      // but in reality, they will yield classes with
+      // `static constexpr size_t ::value` fields to indicate the value
+      // of the face.
+      s::template face<size_t>;
+    });
+
+namespace details::boolevals::simplicial {
+
+template <size_t _dim,
+          size_t _n_primitives,
+          typename simplexset,
+          size_t simplex_idx>
+requires _Simplex<_dim,
+                  typename simplexset::template materialize<(
+                      typename simplexset::_)simplex_idx>>
+struct is_primitive_simplex_impl {
+  static constexpr bool value =
+      is_primitive_simplex_impl<_dim,
+                                _n_primitives,
+                                simplexset,
+                                simplex_idx + 1>::value;
+};
+
+template <size_t _dim, size_t _n_primitives, typename simplexset>
+requires _Simplex<_dim,
+                  typename simplexset::template materialize<(
+                      typename simplexset::_)_n_primitives>>
+struct is_primitive_simplex_impl<_dim,
+                                 _n_primitives,
+                                 simplexset,
+                                 _n_primitives> {
+  static constexpr bool value = true;
+};
+
+template <typename simplexset>
+struct is_simplex_set {
+  static constexpr bool value =
+      is_primitive_simplex_impl<simplexset::_dim,
+                                simplexset::_n_primitives,
+                                simplexset,
+                                0>::value;
+};
+
+}  // namespace details::boolevals::simplicial
+
+template <typename WE>
+concept _SimplexSet = requires {
+  // the dimension of the simplicial set
+  { WE::_dim } -> std::same_as<const size_t>;
+
+  // use this instead if we add a `size_t _dim` parameter to the
+  // `_SimplexSet` template interface.
+  // requires(WE::_dim == _dim);
+
+  // the primitives count of the simplicial set.
+  // note that the primitives are enumerated in `typename WE::_`, and
+  // we assume that these are in order without gaps (i.e.
+  // `typename WE::_(0)` is a member, as is `typename WE::_(i)` for
+  // `i < _n_primitives`.
+  // TODO: maybe check this explicitly using "smart enum techniques".
+  { WE::_n_primitives } -> std::same_as<const size_t>;
+
+  // the underlying "enum" (to distinguish members of the set)
+  requires(std::is_convertible_v<typename WE::_, const size_t>);
+
+  // a type constructor for each "enum", i.e. each of the
+  // points in the simplicial set, provided the `constexpr enum` value.
+
+  // now, requires that each materialized type is a `_Simplex`,
+  // with appropriate matching dimension.
+  // we still don't yet require that the simplices in the set satisfy
+  // the simplicial identities, that must be handled in the simplicial set
+  // once we have access to all of the simplicial sets.
+  requires(details::boolevals::simplicial::is_simplex_set<WE>::value);
+};
+
+namespace details::boolevals::simplicial {
+
+template <size_t _dim, typename simpset, size_t n>
+requires _SimplexSet<typename simpset::template Set<n>>
+struct is_simplex_set_impl {
+  static constexpr bool value =
+      is_simplex_set_impl<_dim, simpset, n + 1>::value;
+};
+
+template <size_t _dim, typename simpset>
+requires _SimplexSet<typename simpset::template Set<_dim>>
+struct is_simplex_set_impl<_dim, simpset, _dim> {
+  static constexpr bool value = true;
+};
+
+template <size_t _dim, typename simpset>
+struct is_simplicial_set {
+  static constexpr bool value = is_simplex_set_impl<_dim, simpset, 0>::value;
+};
+
+}  // namespace details::boolevals::simplicial
+
 namespace details {
 
 //// Basic usual index variadic
@@ -154,25 +261,22 @@ struct _proper_dimensions {
 // Condition (ii) of `identities<...>()`
 namespace condition_ii {
 
-template <typename simplex, size_t _face_codomain_max, size_t face_idx>
+template <size_t targ_n, typename simplex, size_t face_idx>
+requires _Simplex<targ_n, typename simplex::template face<face_idx>>
 struct _impl_face_codomains {
   static constexpr bool value =
-      (simplex::template face<face_idx>::value <= _face_codomain_max)
-          ? _impl_face_codomains<simplex, _face_codomain_max, face_idx - 1>::
-                value
-          : false;
+      _impl_face_codomains<targ_n, simplex, face_idx - 1>::value;
 };
 
-template <typename simplex, size_t _face_codomain_max>
-struct _impl_face_codomains<simplex, _face_codomain_max, 0> {
-  static constexpr bool value =
-      simplex::template face<0>::value <= _face_codomain_max;
+template <size_t targ_n, typename simplex>
+requires _Simplex<targ_n, typename simplex::template face<0>>
+struct _impl_face_codomains<targ_n, simplex, 0> {
+  static constexpr bool value = true;
 };
 
-template <typename simplex, size_t _face_codomain_max>
+template <size_t targ_n, typename simplex>
 constexpr bool _face_codomains() {
-  return _impl_face_codomains<simplex, _face_codomain_max, simplex::_dim>::
-      value;
+  return _impl_face_codomains<targ_n, simplex, simplex::_dim>::value;
 }
 
 template <size_t n, typename simpset, size_t simplex_idx>
@@ -181,7 +285,7 @@ struct _impl_codomains {
   using simplex =
       typename set::template materialize<(typename set::_)simplex_idx>::type;
   static constexpr bool value =
-      (_face_codomains<simplex, simpset::template Set<n - 1>::_n_primitives>())
+      (_face_codomains<n - 1, simplex>())
           ? _impl_codomains<n, simpset, simplex_idx - 1>::value
           : false;
 };
@@ -190,8 +294,7 @@ template <size_t n, typename simpset>
 struct _impl_codomains<n, simpset, 0> {
   using set = typename simpset::template Set<n>;
   using simplex = typename set::template materialize<(typename set::_)0>::type;
-  static constexpr bool value =
-      _face_codomains<simplex, simpset::template Set<n - 1>::_n_primitives>();
+  static constexpr bool value = _face_codomains<n - 1, simplex>();
 };
 
 template <size_t n, typename simpset>
@@ -211,37 +314,28 @@ struct _codomains<0, simpset> {
 // Condition (iii) of `identities<...>()`
 namespace condition_iii {
 
-template <size_t n, typename simplex, typename simpset, size_t i, size_t j>
-struct _impl_simplex_degeneracies {
-  using lowerset = typename simpset::template Set<n - 1>;
+template <size_t n, typename simplex, size_t i, size_t j>
+requires std::same_as<
+    typename simplex::template face<j>::type::template face<i>::type,
+    typename simplex::template face<i>::type::template face<
+        j - 1>::type> struct _impl_simplex_degeneracies {
   static constexpr size_t newi = (i > 0) ? i - 1 : j - 2;
   static constexpr size_t newj = (i > 0) ? j : j - 1;
   static constexpr bool value =
-      (lowerset::template materialize<(
-           typename lowerset::_)simplex::template face<j>::value>::type::
-           template face<i>::value ==
-       lowerset::template materialize<(
-           typename lowerset::_)simplex::template face<i>::value>::type::
-           template face<j - 1>::value)
-          ? _impl_simplex_degeneracies<n, simplex, simpset, newi, newj>::value
-          : false;
+      _impl_simplex_degeneracies<n, simplex, newi, newj>::value;
 };
 
-template <size_t n, typename simplex, typename simpset>
-struct _impl_simplex_degeneracies<n, simplex, simpset, 0, 1> {
-  using lowerset = typename simpset::template Set<n - 1>;
-  static constexpr bool value =
-      lowerset::template materialize<(
-          typename lowerset::_)simplex::template face<1>::value>::type::
-          template face<0>::value ==
-      lowerset::template materialize<
-          (typename lowerset::_)
-              simplex::template face<0>::value>::type::template face<0>::value;
+template <size_t n, typename simplex>
+requires std::same_as<
+    typename simplex::template face<1>::type::template face<0>::type,
+    typename simplex::template face<0>::type::template face<
+        0>::type> struct _impl_simplex_degeneracies<n, simplex, 0, 1> {
+  static constexpr bool value = true;
 };
 
-template <size_t n, typename simplex, typename simpset>
+template <size_t n, typename simplex>
 constexpr bool _simplex_degeneracies() {
-  return _impl_simplex_degeneracies<n, simplex, simpset, n - 1, n>::value;
+  return _impl_simplex_degeneracies<n, simplex, n - 1, n>::value;
 }
 
 template <size_t n, typename simpset, size_t simplex_idx>
@@ -250,7 +344,7 @@ struct _impl_degeneracies {
   using simplex =
       typename set::template materialize<(typename set::_)simplex_idx>::type;
   static constexpr bool value =
-      (_simplex_degeneracies<n, simplex, simpset>())
+      (_simplex_degeneracies<n, simplex>())
           ? _impl_degeneracies<n, simpset, simplex_idx - 1>::value
           : false;
 };
@@ -259,7 +353,7 @@ template <size_t n, typename simpset>
 struct _impl_degeneracies<n, simpset, 0> {
   using set = typename simpset::template Set<n>;
   using simplex = typename set::template materialize<(typename set::_)0>::type;
-  static constexpr bool value = _simplex_degeneracies<n, simplex, simpset>();
+  static constexpr bool value = _simplex_degeneracies<n, simplex>();
 };
 
 template <size_t n, typename simpset>
@@ -310,14 +404,13 @@ requires(condition_i::_proper_dimensions<_dim, simpset>::value&&
 //         `using S = Set::materialize<(Set::_)s>` already satisfies
 //         `_Simplex<Set::_dim, S>`. So we'll check for each
 //         `0 <= i <= S::_dim` that
-//         `S::face<i> <= TruncSimpSet::Set<n - 1>::_n_primitives`.
-//         i.e. the degeneracy lands in the right place
-//         (TODO: for non-primitives, this might get odd.. applies to iii too).
+//         `S::face<i>` is a `_Simplex<n - 1>`.
+//         i.e. the degeneracy lands in the right place.
+//         TODO: check well-defined wrt simplicial set...
 //   (iii) We now know that the `S::face`s are well-defined, hence
 //         we need only check the simplicial identities, i.e. for each
 //         `0 <= i < j <= S::_dim` that
-//         `TruncSimpSet<n - 1>::materialize<S::face<j>>::face<i> ==
-//         `TruncSimpSet<n - 1>::materialize<S::face<i>>::face<j - 1>`.
+//         `S::face<j>::face<i> == S::face<i>::face<j - 1>`.
 template <size_t _dim, typename simpset>
 struct identities {
   static constexpr bool value = _impl_identities<_dim, simpset, 0>::value;
@@ -326,106 +419,6 @@ struct identities {
 }  // namespace simplicial
 }  // namespace boolevals
 }  // namespace details
-
-template <size_t _dim, typename s>
-concept _Simplex = (
-    requires { _dim <= 0; } ||
-    requires {
-      // the dimension of the simplex.
-      requires(s::_dim == _dim);
-
-      // we don't require the degeneracies here, that's handled in the
-      // `_SimplicialSet`.
-      // but in reality, they will yield classes with
-      // `static constexpr size_t ::value` fields to indicate the value
-      // of the face.
-      s::template face<size_t>;
-    });
-
-namespace details::boolevals::simplicial {
-
-template <size_t _dim,
-          size_t _n_primitives,
-          typename simplexset,
-          size_t simplex_idx>
-requires _Simplex<_dim,
-                  typename simplexset::template materialize<(
-                      typename simplexset::_)simplex_idx>>
-struct is_simplex_impl {
-  static constexpr bool value =
-      is_simplex_impl<_dim, _n_primitives, simplexset, simplex_idx + 1>::value;
-};
-
-template <size_t _dim, size_t _n_primitives, typename simplexset>
-requires _Simplex<_dim,
-                  typename simplexset::template materialize<(
-                      typename simplexset::_)_n_primitives>>
-struct is_simplex_impl<_dim, _n_primitives, simplexset, _n_primitives> {
-  static constexpr bool value = true;
-};
-
-template <typename simplexset>
-struct is_simplex_set {
-  static constexpr bool value = is_simplex_impl<simplexset::_dim,
-                                                simplexset::_n_primitives,
-                                                simplexset,
-                                                0>::value;
-};
-
-}  // namespace details::boolevals::simplicial
-
-template <typename WE>
-concept _SimplexSet = requires {
-  // the dimension of the simplicial set
-  { WE::_dim } -> std::same_as<const size_t>;
-
-  // use this instead if we add a `size_t _dim` parameter to the
-  // `_SimplexSet` template interface.
-  // requires(WE::_dim == _dim);
-
-  // the primitives count of the simplicial set.
-  // note that the primitives are enumerated in `typename WE::_`, and
-  // we assume that these are in order without gaps (i.e.
-  // `typename WE::_(0)` is a member, as is `typename WE::_(i)` for
-  // `i < _n_primitives`.
-  // TODO: maybe check this explicitly using "smart enum techniques".
-  { WE::_n_primitives } -> std::same_as<const size_t>;
-
-  // the underlying "enum" (to distinguish members of the set)
-  requires(std::is_convertible_v<typename WE::_, const size_t>);
-
-  // a type constructor for each "enum", i.e. each of the
-  // points in the simplicial set, provided the `constexpr enum` value.
-
-  // now, requires that each materialized type is a `_Simplex`,
-  // with appropriate matching dimension.
-  // we still don't yet require that the simplices in the set satisfy
-  // the simplicial identities, that must be handled in the simplicial set
-  // once we have access to all of the simplicial sets.
-  requires(details::boolevals::simplicial::is_simplex_set<WE>::value);
-};
-
-namespace details::boolevals::simplicial {
-
-template <size_t _dim, typename simpset, size_t n>
-requires _SimplexSet<typename simpset::template Set<n>>
-struct is_simplex_set_impl {
-  static constexpr bool value =
-      is_simplex_set_impl<_dim, simpset, n + 1>::value;
-};
-
-template <size_t _dim, typename simpset>
-requires _SimplexSet<typename simpset::template Set<_dim>>
-struct is_simplex_set_impl<_dim, simpset, _dim> {
-  static constexpr bool value = true;
-};
-
-template <size_t _dim, typename simpset>
-struct is_simplicial_set {
-  static constexpr bool value = is_simplex_set_impl<_dim, simpset, 0>::value;
-};
-
-}  // namespace details::boolevals::simplicial
 
 template <size_t _dim, typename TS>
 concept _TruncatedSimplicialSet = requires {
@@ -496,12 +489,12 @@ struct Standard2Simplex {
 
       template <>
       struct face<0> {
-        static constexpr Set<0>::_ value = Set<0>::_::A;
+        using type = typename Set<0>::template materialize<Set<0>::_::A>::type;
       };
 
       template <>
       struct face<1> {
-        static constexpr Set<0>::_ value = Set<0>::_::B;
+        using type = typename Set<0>::template materialize<Set<0>::_::B>::type;
       };
     };
 
@@ -513,12 +506,12 @@ struct Standard2Simplex {
 
       template <>
       struct face<0> {
-        static constexpr Set<0>::_ value = Set<0>::_::B;
+        using type = typename Set<0>::template materialize<Set<0>::_::B>::type;
       };
 
       template <>
       struct face<1> {
-        static constexpr Set<0>::_ value = Set<0>::_::C;
+        using type = typename Set<0>::template materialize<Set<0>::_::C>::type;
       };
     };
 
@@ -530,12 +523,12 @@ struct Standard2Simplex {
 
       template <>
       struct face<0> {
-        static constexpr Set<0>::_ value = Set<0>::_::A;
+        using type = typename Set<0>::template materialize<Set<0>::_::A>::type;
       };
 
       template <>
       struct face<1> {
-        static constexpr Set<0>::_ value = Set<0>::_::C;
+        using type = typename Set<0>::template materialize<Set<0>::_::C>::type;
       };
     };
 
@@ -576,17 +569,18 @@ struct Standard2Simplex {
 
       template <>
       struct face<0> {
-        static constexpr Set<1>::_ value = Set<1>::_::f;
+        using type = typename Set<1>::template materialize<Set<1>::_::f>::type;
       };
 
       template <>
       struct face<1> {
-        static constexpr Set<1>::_ value = Set<1>::_::gf;
+        using type =
+            typename Set<1>::template materialize<Set<1>::_::gf>::type;
       };
 
       template <>
       struct face<2> {
-        static constexpr Set<1>::_ value = Set<1>::_::g;
+        using type = typename Set<1>::template materialize<Set<1>::_::g>::type;
       };
     };
 
@@ -642,8 +636,8 @@ struct StandardSimplex {
   using Set = std::conditional_t<0 <= i && i <= n, _Set<i>, void>;
 };
 
-using testStandard0Simplex0Truncated =
-    RequiresTruncated<0, StandardSimplex<0>>;
+// using testStandard0Simplex0Truncated =
+//     RequiresTruncated<0, StandardSimplex<0>>;
 
 }  // namespace simpsets::tests
 
@@ -671,7 +665,7 @@ int main(int argc, char* argv[]) {
   using simplex2 = typename simpset::template Set<2>::materialize<(
       typename simpset::template Set<2>::_)0>::type;
 
-  std::cout << "2 simplex degeneraceis:" << std::endl;
+  // std::cout << "2 simplex degeneraceis:" << std::endl;
   {
 #define print_degeneracies(I, J, it)                                          \
   constexpr size_t i##it = I;                                                 \
@@ -685,8 +679,8 @@ int main(int argc, char* argv[]) {
                        i##it>::value>::type::template face<j##it - 1>::value) \
       << std::endl;
 
-    print_degeneracies(1, 2, 0) print_degeneracies(0, 2, 1)
-        print_degeneracies(0, 1, 2)
+    // print_degeneracies(1, 2, 0) print_degeneracies(0, 2, 1)
+    //     print_degeneracies(0, 1, 2)
 #undef print_degeneracies
   }
 
