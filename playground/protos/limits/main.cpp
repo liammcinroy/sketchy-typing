@@ -1,21 +1,10 @@
+#include <algorithm>
+#include <compare>
 #include <concepts>
 #include <iostream>
 #include <type_traits>
 
-namespace protos::enums {
-
-enum Vertices { a, b, c };
-
-template <typename E>
-concept _Enum = requires {
-  requires(std::is_enum_v<E>);
-};
-
-template <_Enum E>
-struct IsEnum {};
-
-// works, as expected.
-using test1 = IsEnum<Vertices>;
+namespace protos::limits {
 
 // now, we are going to try to allow building `enum`s of `enum`s,
 // i.e. representing the 1-simplices explicitly.
@@ -311,7 +300,7 @@ requires(condition_i::_proper_dimensions<_dim, simpset>::value&&
 };
 
 // the `_TruncatedSimplicialSet` concept says that
-// each `typename TruncSimpSet::Set<size_t>` is `_SimplexSetEnum`.
+// each `typename TruncSimpSet::Set<size_t>` is `_SimplexSet`.
 //
 // so, the simplicial identities will say that, for each
 // `0 <= n < _dim`, then
@@ -353,13 +342,45 @@ concept _Simplex = (
       s::template face<size_t>;
     });
 
+namespace details::boolevals::simplicial {
+
+template <size_t _dim,
+          size_t _n_primitives,
+          typename simplexset,
+          size_t simplex_idx>
+requires _Simplex<_dim,
+                  typename simplexset::template materialize<(
+                      typename simplexset::_)simplex_idx>>
+struct is_simplex_impl {
+  static constexpr bool value =
+      is_simplex_impl<_dim, _n_primitives, simplexset, simplex_idx + 1>::value;
+};
+
+template <size_t _dim, size_t _n_primitives, typename simplexset>
+requires _Simplex<_dim,
+                  typename simplexset::template materialize<(
+                      typename simplexset::_)_n_primitives>>
+struct is_simplex_impl<_dim, _n_primitives, simplexset, _n_primitives> {
+  static constexpr bool value = true;
+};
+
+template <typename simplexset>
+struct is_simplex_set {
+  static constexpr bool value = is_simplex_impl<simplexset::_dim,
+                                                simplexset::_n_primitives,
+                                                simplexset,
+                                                0>::value;
+};
+
+}  // namespace details::boolevals::simplicial
+
 template <typename WE>
-concept _SimplexSetEnum = requires {
+concept _SimplexSet = requires {
   // the dimension of the simplicial set
   { WE::_dim } -> std::same_as<const size_t>;
 
   // use this instead if we add a `size_t _dim` parameter to the
-  // `_SimplexSetEnum` template interface.
+  // `_SimplexSet` template interface.
   // requires(WE::_dim == _dim);
 
   // the primitives count of the simplicial set.
@@ -370,28 +391,49 @@ concept _SimplexSetEnum = requires {
   // TODO: maybe check this explicitly using "smart enum techniques".
   { WE::_n_primitives } -> std::same_as<const size_t>;
 
-  // the underlying `enum` (to distinguish members of the set)
-  requires(std::is_enum_v<typename WE::_>);
+  // the underlying "enum" (to distinguish members of the set)
+  requires(std::is_convertible_v<typename WE::_, const size_t>);
 
-  // a type constructor for each `enum`, i.e. each of the
+  // a type constructor for each "enum", i.e. each of the
   // points in the simplicial set, provided the `constexpr enum` value.
-  WE::template materialize<typename WE::_>;
 
   // now, requires that each materialized type is a `_Simplex`,
   // with appropriate matching dimension.
   // we still don't yet require that the simplices in the set satisfy
   // the simplicial identities, that must be handled in the simplicial set
   // once we have access to all of the simplicial sets.
-  requires _Simplex<WE::_dim,
-                    typename WE::template materialize<typename WE::_>>;
+  requires(details::boolevals::simplicial::is_simplex_set<WE>::value);
 };
+
+namespace details::boolevals::simplicial {
+
+template <size_t _dim, typename simpset, size_t n>
+requires _SimplexSet<typename simpset::template Set<n>>
+struct is_simplex_set_impl {
+  static constexpr bool value =
+      is_simplex_set_impl<_dim, simpset, n + 1>::value;
+};
+
+template <size_t _dim, typename simpset>
+requires _SimplexSet<typename simpset::template Set<_dim>>
+struct is_simplex_set_impl<_dim, simpset, _dim> {
+  static constexpr bool value = true;
+};
+
+template <size_t _dim, typename simpset>
+struct is_simplicial_set {
+  static constexpr bool value = is_simplex_set_impl<_dim, simpset, 0>::value;
+};
+
+}  // namespace details::boolevals::simplicial
 
 template <size_t _dim, typename TS>
 concept _TruncatedSimplicialSet = requires {
   // the simplicial set defined at each level, truncated after n.
   // (note that truncation isn't actually checked.)
-  // TS::template Set<size_t>;
-  // { typename TS::template Set<size_t> } -> _SimplexSetEnum;
+  // Basically checking:
+  // { typename TS::template Set<size_t> } -> _SimplexSet;
+  requires(details::boolevals::simplicial::is_simplicial_set<_dim, TS>::value);
 
   // the simplicial identities are satisfied.
   requires(details::boolevals::simplicial::identities<_dim, TS>::value);
@@ -564,12 +606,51 @@ using testStandard2Simplex0Truncated = RequiresTruncated<0, Standard2Simplex>;
 using testStandard2Simplex1Truncated = RequiresTruncated<1, Standard2Simplex>;
 using testStandard2Simplex2Truncated = RequiresTruncated<2, Standard2Simplex>;
 
+template <size_t n>
+struct StandardSimplex {
+  template <size_t _count>
+  struct _pseudoenum {
+    size_t _value;
+
+    constexpr _pseudoenum(const size_t& val) {
+      if (val < _count)
+        _value = val;
+      else
+        _value = -1;
+    }
+
+    auto operator<=>(const _pseudoenum&) const = default;
+
+    operator size_t() const { return _value; }
+  };
+
+  template <size_t i>
+  struct _Set {};
+
+  template <>
+  struct _Set<0> {
+    static constexpr size_t _dim = 0;
+    static constexpr size_t _n_primitives = n + 1;
+
+    using _ = size_t;  // _pseudoenum<n + 1>;
+
+    template <_ object>
+    struct materialize;
+  };
+
+  template <size_t i>
+  using Set = std::conditional_t<0 <= i && i <= n, _Set<i>, void>;
+};
+
+using testStandard0Simplex0Truncated =
+    RequiresTruncated<0, StandardSimplex<0>>;
+
 }  // namespace simpsets::tests
 
-}  // namespace protos::enums
+}  // namespace protos::limits
 
 int main(int argc, char* argv[]) {
-  using simpset = protos::enums::simpsets::tests::Standard2Simplex;
+  using simpset = protos::limits::simpsets::tests::Standard2Simplex;
   using simplexset0 = typename simpset::template Set<0>;
   auto asString0 = [](const simplexset0::_ s) {
     if (s == simplexset0::_::A) return "A";
