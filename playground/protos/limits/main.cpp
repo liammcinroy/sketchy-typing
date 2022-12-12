@@ -600,71 +600,80 @@ using testStandard2Simplex0Truncated = RequiresTruncated<0, Standard2Simplex>;
 using testStandard2Simplex1Truncated = RequiresTruncated<1, Standard2Simplex>;
 using testStandard2Simplex2Truncated = RequiresTruncated<2, Standard2Simplex>;
 
-template <size_t n>
-struct StandardSimplex {
-  // creates a unique new type for each wrapping `uid`.
-  // but it really should just be the "same" as `V`, without
-  // satisfying `std::same_as<V>`.
-  template <size_t _uid, typename V>
-  struct FormedVertex {
-    using original = V;
-    static constexpr size_t uid = _uid;
+//// Now trying to automate the standard simplicies
 
-    V _value;
-    constexpr FormedVertex(const V& val) { _value = val; }
-    auto operator<=>(const FormedVertex&) const = default;
-    operator V() const { return _value; }
+// creates a unique new type for each wrapping `uid`.
+// but it really should just be the "same" as `V`, without
+// satisfying `std::same_as<V>`.
+template <size_t _uid, typename V>
+struct FormedVertex {
+  using original = V;
+  static constexpr size_t uid = _uid;
 
-    template <size_t new_uid>
-    using replace_uid = FormedVertex<new_uid, V>;
-  };
+  V _value;
+  constexpr FormedVertex(const V& val) { _value = val; }
+  auto operator<=>(const FormedVertex&) const = default;
+  operator V() const { return _value; }
 
-  // The idea being, we only ``define'' one `StandardSimplex<n - 1>`
-  // but wrap it several times to obtain the other `n + 1` necessary
-  // copies.
-  //
-  // There is one trick,
-  template <size_t __dim,
-            typename S,
-            template <size_t, size_t, typename>
-            class W>
-  requires _Simplex<__dim, S>
-  struct FormedSimplex {
-    struct type {
-      static constexpr size_t _dim = __dim;
-
-      // each `face<i>` is supposed to have a `::type`, so this is ok,
-      // and we want each `face<i>` to have a `::type` so we can do the
-      // base case of `FormedVertex`.
-      template <size_t i>
-      using face = FormedSimplex<
-          _dim - 1,
-          typename W<_dim, i, typename S::template face<i>::type>::type,
-          W>;
-    };
-  };
-
-  template <typename S, template <size_t, size_t, typename> class W>
-  requires _Simplex<0, typename S::original> &&
-      std::is_convertible_v<S::uid, const size_t>
-  struct FormedSimplex<0, S, W> {
-    using type = FormedVertex<S::uid, typename S::original>;
-  };
-
-  template <size_t nn>
-  struct _Set {
-    static constexpr size_t _dim = nn;
-  };
-
-  template <size_t i>
-  using Set = std::conditional_t<0 <= i && i <= n, _Set<i>, void>;
+  template <size_t new_uid>
+  using replace_uid = FormedVertex<new_uid, V>;
 };
 
-// crazily, we have to put this outside of the definition of
-// `StandardSimplex` to prevent "instantiated within its own definition"
-// errors.
+// The idea being, we only ``define'' one `StandardSimplex<n - 1>`
+// but wrap it several times to obtain the other `n + 1` necessary
+// copies.
+//
+// There is one trick,
+template <size_t __dim,
+          typename S,
+          template <size_t, size_t, typename>
+          class W>
+requires _Simplex<__dim, S>
+struct FormedSimplex {
+  struct type {
+    static constexpr size_t _dim = __dim;
+
+    // each `face<i>` is supposed to have a `::type`, so this is ok,
+    // and we want each `face<i>` to have a `::type` so we can do the
+    // base case of `FormedVertex`.
+    template <size_t i>
+    using face = FormedSimplex<
+        _dim - 1,
+        typename W<_dim, i, typename S::template face<i>::type>::type,
+        W>;
+  };
+};
+
+template <typename S, template <size_t, size_t, typename> class W>
+requires _Simplex<0, typename S::original> &&
+    std::is_convertible_v<S::uid, const size_t>
+struct FormedSimplex<0, S, W> {
+  using type = FormedVertex<S::uid, typename S::original>;
+};
+
+template <size_t n, size_t __dim>
+struct StandardSimplexSet {
+  static constexpr size_t _dim = __dim;
+};
+
+template <>
+struct StandardSimplexSet<0, 0> {
+  static constexpr size_t _dim = 0;
+  static constexpr size_t _n_primitives = 0;
+
+  using _ = size_t;
+
+  template <_ object>
+  struct materialize;
+
+  template <>
+  struct materialize<0> {
+    using type = void;
+  };
+};
+
 template <size_t n>
-struct StandardSimplex<n>::_Set<0> {
+struct StandardSimplexSet<n, 0> {
   static constexpr size_t _dim = 0;
   static constexpr size_t _n_primitives = n;
 
@@ -672,36 +681,21 @@ struct StandardSimplex<n>::_Set<0> {
 
   template <_ object>
   struct materialize {
-    using type = FormedVertex<object,
-                              typename StandardSimplex<0>::template Set<
-                                  0>::template materialize<0>::type>;
+    using type = FormedVertex<
+        object,
+        typename StandardSimplexSet<0, 0>::template materialize<0>::type>;
   };
 };
 
-template <>
-struct StandardSimplex<0> {
+template <size_t n>
+struct StandardSimplex {
   template <size_t i>
-  struct Set {};
-
-  template <>
-  struct Set<0> {
-    static constexpr size_t _dim = 0;
-    static constexpr size_t _n_primitives = 0;
-
-    using _ = size_t;
-
-    template <_ object>
-    struct materialize;
-
-    template <>
-    struct materialize<0> {
-      using type = void;
-    };
-  };
+  using Set =
+      std::conditional_t<0 <= i && i <= n, StandardSimplexSet<n, i>, void>;
 };
 
-using testStandard0Simplex0Truncated =
-    RequiresTruncated<0, StandardSimplex<0>>;
+using testS0T0 = RequiresTruncated<0, StandardSimplex<0>>;
+using testS1T0 = RequiresTruncated<0, StandardSimplex<1>>;
 
 }  // namespace simpsets::tests
 

@@ -1,0 +1,45 @@
+each `::face<i_1>::type::face<i_2>::type::....::face<i_n>::type`
+ought to be equivalent to some
+`::face<j_1>::type::face<j_2>::type::....::face<j_n>::type`
+where `j_n < ... < j_1`, by simplicial identities.
+
+The point being, if have sorted `i_k < ... < i_1`, and add
+a `i_{k + 1}`, then if `i_k <= i_{k + 1}`, we equivalently have
+applied `i_k (1 + i_{k + 1}) ... i_1`, which we continue until sorted.
+
+At any given level `k`, and sorted `i_k < ... < i_1`, we know that this
+`n - k` simplex has all vertices except `i_k, ..., i_1`.
+
+so if we update `size_t... idx`
+
+but we should aim to encode these, the same way as general maps of
+simplices/simplicial sets.
+
+normally, it is simplicial set is (op)functor of lin. ordered to sets
+(with degeneracies). Here, we say it instead is just sets of primitive
+simplexes and maps of them composed out of lower.
+
+i.e. we are allowing degenerate simplicies in the simplicial set, so no issue
+in modeling a standard simplex in terms of maps of its lower (and then
+simplices in arbitrary is both map from standard to simplicial set or
+otherwise).
+
+One difference in the maps vs. formation is that maps have explicit codomains
+everywhere, versus the formations are materializing their codomains. We also
+need a method to check whether a given codomain of a map is valid (either as
+a primitive, or materialization).
+
+So we ought to allow each simplex set to have a collection of formation
+operation.
+
+(We are maybe confounding ``subcategory of simplicial sets'' with a particular
+simplicial set, which are in some sort of correspondence). What we really want,
+is we have some simplicial set of primitives defined. We then define some
+formations/universal constructions, and want to model the simplicial set given
+by the closure of the previous under those constructions (i.e. the joins of
+over- simplicial sets)
+
+so we really want there to be some enumeration of primitives and combinators
+/ abstractions, then each simplex carries either a primitive structure or
+a sequence of combinators used to construct it...
+
