@@ -391,6 +391,46 @@ struct dimension {
 
 }  // namespace details::boolevals::simplicial::faces
 
+namespace details::boolevals::simplicial {
+
+template <size_t n, typename simplex>
+requires _Simplex<n, simplex>
+struct form_simplex {
+  template <typename... fs>
+  struct sub_form_simplex {
+    using type = typename faces::template form_simplex<n, true, fs...>;
+  };
+
+  static constexpr bool value =
+      simplex::template apply_faces<sub_form_simplex>::value;
+};
+
+template <typename simplex>
+requires _Simplex<0, simplex>
+struct form_simplex<0, simplex> {
+  static constexpr bool value = true;
+};
+
+template <size_t n, typename simplex>
+requires _Simplex<n, simplex>
+struct dimension {
+  template <typename... fs>
+  struct sub_dimension {
+    using type = typename faces::template dimension<n, fs...>;
+  };
+
+  static constexpr bool value =
+      simplex::template apply_faces<sub_dimension>::value;
+};
+
+template <typename simplex>
+requires _Simplex<0, simplex>
+struct dimension<0, simplex> {
+  static constexpr bool value = true;
+};
+
+}  // namespace details::boolevals::simplicial
+
 // Implements _Simplex<sizeof...(faces) + 1>.
 template <_Symbol _symbol, size_t n, typename... faces>
 requires(details::boolevals::simplicial::faces::dimension<n, faces...>::value&&
@@ -414,8 +454,32 @@ struct Simplex<_symbol, 0> {
   using symbol = _symbol;
 };
 
-namespace tests::simplex {
+template <size_t n, typename simplex>
+requires(details::boolevals::simplicial::dimension<n, simplex>::value&&
+             details::boolevals::simplicial::form_simplex<n, simplex>::
+                 value) struct OpSimplex {
+  static constexpr size_t dim = n;
 
+  using symbol = typename simplex::symbol;
+
+  template <size_t i>
+  struct face {
+    using type =
+        OpSimplex<n - 1, typename simplex::template face<n - i>::type>;
+  };
+
+  template <template <typename...> typename F>
+  using apply_faces = typename simplex::template apply_faces<F>::type;
+};
+
+template <typename simplex>
+struct OpSimplex<0, simplex> {
+  static constexpr size_t dim = 0;
+
+  using symbol = typename simplex::_symbol;
+};
+
+namespace tests::simplex {
 template <size_t tag, typename... args>
 using SymbolST = Symbol<size_t, tag, args...>;
 
@@ -447,22 +511,40 @@ using S1_2 = SimplexST<SymbolST<01>, 1, S0_0, S0_1>;
 
 // this is a standard 2-simplex
 using S2 = SimplexST<SymbolST<012>, 2, S1_2, S1_1, S1_0>;
+using test3 = RequiresSimplex<2, S2>;
+
+// try opposite
+using opS2 = OpSimplex<2, S2>;
+using test4 = RequiresSimplex<2, opS2>;
 
 };  // namespace tests::simplex
 
 //// now we can get into the simplicial sets.
 
-// template <typename F>
-// concept _Formation = requires {
-//   // it'd be nice if we could do this, but apparently not...
-//   F::template materialize<auto>;
-// };
+// we don't ask to specifically enumerate all of the simplices of
+// a simplicial set, instead we adopt the convention that there are
+// is a collection of `TagType`s for primitives at each dimension
+// and a collection of `_DiagramSimplicialSet` for formations at each
+// dimension.
+//
+// Notably, the formation `_DiagramSimplicialSet`s are fully enumerable, and
+// ought to include the proper `_Symbol` for the formed simplices. We might
+// implement `Limit<...>` and `Colimit<...>` methods
 
-// template <size_t _arity, typename F>
-// concept _Formation = requires {
-//   // this would also maybe be nice...
-//   F::template materialize<_Symbol...>;
-// };
+/*
+template <size_t _dim, typename s>
+concept _DiagramSimplicialSet = requires {
+
+  typename TagType
+
+};
+
+template <size_t _dim, typename s>
+concept _SimplicialSet = requires {
+  requires(_DiagramSimplicialSet
+
+};
+*/
 
 // template <typename s>
 // concept _SimplicialSet = requires {
@@ -486,6 +568,26 @@ namespace tests::formation {}
 }  // namespace protos::symbolsimplex
 
 int main(int argc, char* argv[]) {
+  std::cout << "S2 symbols: "
+            << protos::symbolsimplex::simpsets::tests::simplex::S2::face<
+                   0>::type::symbol::tag
+            << ", "
+            << protos::symbolsimplex::simpsets::tests::simplex::S2::face<
+                   1>::type::symbol::tag
+            << ", "
+            << protos::symbolsimplex::simpsets::tests::simplex::S2::face<
+                   2>::type::symbol::tag
+            << std::endl;
+  std::cout << "opS2 symbols: "
+            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+                   0>::type::symbol::tag
+            << ", "
+            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+                   1>::type::symbol::tag
+            << ", "
+            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+                   2>::type::symbol::tag
+            << std::endl;
   std::cout << "compiled!" << std::endl;
   return 0;
 }
