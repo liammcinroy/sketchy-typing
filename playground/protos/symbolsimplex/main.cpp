@@ -273,6 +273,10 @@ concept _Simplex = (requires {
 
   // the symbol attached to the simplex
   requires(_Symbol<typename s::symbol>);
+
+  // we don't explicitly enforce that each degeneracy is a
+  // `_Simplex` here. That will be handled in `Simplex`.
+  // s::template degeneracy<size_t>;
 } &&
                     (
                         requires { _dim <= 0; } ||
@@ -389,6 +393,12 @@ struct dimension {
       (n == 0) ? sizeof...(faces) == 0 : sizeof...(faces) == n + 1;
 };
 
+template <size_t n, typename... faces>
+struct is_simplex {
+  static constexpr bool value =
+      dimension<n, faces...>::value && form_simplex<n, true, faces...>::value;
+};
+
 }  // namespace details::boolevals::simplicial::faces
 
 namespace details::boolevals::simplicial {
@@ -429,13 +439,78 @@ struct dimension<0, simplex> {
   static constexpr bool value = true;
 };
 
+template <size_t n, typename simplex>
+struct is_simplex {
+  static constexpr bool value =
+      dimension<n, simplex>::value && form_simplex<n, simplex>::value;
+};
+
 }  // namespace details::boolevals::simplicial
+
+namespace details::simplicial {
+
+enum _Conditions { Less, Id, Greater };
+
+template <size_t i, size_t j>
+constexpr _Conditions condition() {
+  if (i < j) return _Conditions::Less;
+  if (i == j || i == j + 1)
+    return _Conditions::Id;
+  else
+    return _Conditions::Greater;
+}
+
+template <size_t i, size_t j, typename simplex, _Conditions cond>
+struct degeneracy_impl;
+
+template <size_t i, size_t j, typename simplex>
+struct degeneracy_impl<i, j, simplex, _Conditions::Less> {
+  using type =
+      typename simplex::template face<i>::type::template degeneracy<j -
+                                                                    1>::type;
+};
+
+template <size_t i, size_t j, typename simplex>
+struct degeneracy_impl<i, j, simplex, _Conditions::Id> {
+  using type = simplex;
+};
+
+template <size_t i, size_t j, typename simplex>
+struct degeneracy_impl<i, j, simplex, _Conditions::Greater> {
+  using type =
+      typename simplex::template face<i -
+                                      1>::type::template degeneracy<j>::type;
+};
+
+template <size_t j,
+          typename simplex,
+          template <typename...>
+          typename constructor>
+struct degeneracy {
+  template <size_t N, typename = std::make_index_sequence<N>>
+  struct build;
+
+  template <size_t N, size_t... S>
+  struct build<N, std::index_sequence<S...>> {
+    template <size_t i>
+    using face =
+        typename degeneracy_impl<i, j, simplex, condition<i, j>()>::type;
+
+    using type = typename constructor<face<S>...>::type;
+  };
+  ;
+
+  using type = typename build<simplex::dim + 2>::type;
+};
+
+}  // namespace details::simplicial
 
 // Implements _Simplex<sizeof...(faces) + 1>.
 template <_Symbol _symbol, size_t n, typename... faces>
-requires(details::boolevals::simplicial::faces::dimension<n, faces...>::value&&
-             details::boolevals::simplicial::faces::
-                 form_simplex<n, true, faces...>::value) struct Simplex {
+requires(details::boolevals::simplicial::faces::is_simplex<n, faces...>::
+             value) struct Simplex {
+  using This = Simplex<_symbol, n, faces...>;
+
   static constexpr size_t dim = n;
 
   using symbol = _symbol;
@@ -445,19 +520,38 @@ requires(details::boolevals::simplicial::faces::dimension<n, faces...>::value&&
 
   template <template <typename...> typename F>
   using apply_faces = typename F<faces...>::type;
+
+  template <size_t j>
+  struct degeneracy {
+    template <typename... new_faces>
+    struct new_degenerate_simplex {
+      using type = Simplex<_symbol, n + 1, new_faces...>;
+    };
+
+    using type = typename details::simplicial::
+        degeneracy<j, This, new_degenerate_simplex>::type;
+  };
 };
 
 template <_Symbol _symbol>
 struct Simplex<_symbol, 0> {
+  using This = Simplex<_symbol, 0>;
+
   static constexpr size_t dim = 0;
 
   using symbol = _symbol;
+
+  template <size_t>
+  struct degeneracy {
+    using type = Simplex<_symbol, 1, This, This>;
+  };
 };
 
 template <size_t n, typename simplex>
-requires(details::boolevals::simplicial::dimension<n, simplex>::value&&
-             details::boolevals::simplicial::form_simplex<n, simplex>::
-                 value) struct OpSimplex {
+requires(details::boolevals::simplicial::is_simplex<n, simplex>::
+             value) struct OpSimplex {
+  using This = OpSimplex<n, simplex>;
+
   static constexpr size_t dim = n;
 
   using symbol = typename simplex::symbol;
@@ -465,18 +559,32 @@ requires(details::boolevals::simplicial::dimension<n, simplex>::value&&
   template <size_t i>
   struct face {
     using type =
-        OpSimplex<n - 1, typename simplex::template face<n - i>::type>;
+        OpSimplex<n - 1, typename simplex::template face<dim - i>::type>;
   };
 
   template <template <typename...> typename F>
   using apply_faces = typename simplex::template apply_faces<F>::type;
+
+  template <size_t j>
+  struct degeneracy {
+    using type =
+        OpSimplex<n - 1, typename simplex::template degeneracy<dim - j>::type>;
+  };
 };
 
 template <typename simplex>
 struct OpSimplex<0, simplex> {
+  using This = OpSimplex<0, simplex>;
+
   static constexpr size_t dim = 0;
 
   using symbol = typename simplex::_symbol;
+
+  template <size_t j>
+  struct degeneracy {
+    using type =
+        OpSimplex<1, typename simplex::template degeneracy<dim - j>::type>;
+  };
 };
 
 namespace tests::simplex {
@@ -495,12 +603,17 @@ using S0_0 = SimplexST<SymbolST<0>, 0>;
 using test0 = RequiresSimplex<0, S0_0>;
 
 // this is a degenerate 1-simplex (actually a vertex)
-using DS1 = SimplexST<SymbolST<1>, 1, S0_0, S0_0>;
+using DS1 = SimplexST<SymbolST<0>, 1, S0_0, S0_0>;
 using test1 = RequiresSimplex<1, DS1>;
+// see!
+static_assert(std::same_as<DS1, typename S0_0::degeneracy<0>::type>);
 
 // this is a degenerate 2-simplex (actually a vertex)
-using DS2 = SimplexST<SymbolST<2>, 2, DS1, DS1, DS1>;
+using DS2 = SimplexST<SymbolST<0>, 2, DS1, DS1, DS1>;
 using test2 = RequiresSimplex<2, DS2>;
+// see!
+static_assert(std::same_as<DS2, typename DS1::degeneracy<0>::type>);
+static_assert(std::same_as<DS2, typename DS1::degeneracy<1>::type>);
 
 using S0_1 = SimplexST<SymbolST<1>, 0>;
 using S0_2 = SimplexST<SymbolST<2>, 0>;
@@ -521,6 +634,31 @@ using test4 = RequiresSimplex<2, opS2>;
 
 //// now we can get into the simplicial sets.
 
+namespace details::boolevals::simplicial {
+
+template <typename simplex, typename... simplices>
+requires(is_simplex<simplex::dim, simplex>::value) struct are_simplices_impl {
+  static constexpr bool value = are_simplices_impl<simplices...>::value;
+};
+
+template <typename simplex>
+requires(is_simplex<simplex::dim,
+                    simplex>::value) struct are_simplices_impl<simplex> {
+  static constexpr bool value = true;
+};
+
+template <typename... simplices>
+struct are_simplices {
+  static constexpr bool value = are_simplices_impl<simplices...>::value;
+};
+
+template <>
+struct are_simplices<> {
+  static constexpr bool value = true;
+};
+
+}  // namespace details::boolevals::simplicial
+
 // we don't ask to specifically enumerate all of the simplices of
 // a simplicial set, instead we adopt the convention that there are
 // is a collection of `TagType`s for primitives at each dimension
@@ -531,18 +669,28 @@ using test4 = RequiresSimplex<2, opS2>;
 // ought to include the proper `_Symbol` for the formed simplices. We might
 // implement `Limit<...>` and `Colimit<...>` methods
 
-/*
-template <size_t _dim, typename s>
-concept _DiagramSimplicialSet = requires {
+template <size_t _dim, typename sc>
+concept _DiagramSimplexComponent = requires {
+  requires(sc::dim == _dim);
 
-  typename TagType
+  // the number of simplices.
+  { sc::count } -> std::same_as<const size_t>;
 
+  // iterate, through the count.
+  sc::template iterate<size_t>;
+
+  // lower component.
+  typename sc::lower;
 };
 
 template <size_t _dim, typename s>
-concept _SimplicialSet = requires {
-  requires(_DiagramSimplicialSet
+concept _DiagramSimplicialSet = requires {
+  requires(s::dim == _dim);
+};
 
+/*
+template <size_t _dim, typename s>
+concept _SimplicialSet = requires {
 };
 */
 
