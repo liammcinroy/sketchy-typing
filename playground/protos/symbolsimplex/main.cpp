@@ -55,6 +55,33 @@ namespace protos::symbolsimplex {
 //     a universal property), then this just becomes a new 0-simplex without
 //     any relations in higher simplices.
 //
+//     To be more concrete, suppose F_0(T, U) is T x U. then we might encode
+//     F_0(T, U) within the 1-truncated (or is it 0-truncated) simplicial set
+//     (p_T : T x U -> T, p_U : T x U -> U, 0) --- note that this might be
+//     better represented as the left cone over the 2-2 horn over the terminal
+//     object... see:
+//     https://ncatlab.org/nlab/show/join+of+simplicial+sets
+//     #joins_with_the_point_cones
+//     Similarly, we'd have that T + U is the right cone over the 0-2 horn
+//     from the initial object.
+//
+//     To generalize, for F_0(...), we just encode the 1-truncated simplicial
+//     set of the vertices + any structural information we have about the
+//     (co)limit diagram (if they exist).
+//
+//     If we don't have any sort of additional semantic information about
+//     F_0(...), then we just don't have any n-simplexes for n > 0 encoding
+//     as a witness of the introduced vertex. I.e. we revert to (1). But note
+//     that this is just a special case of exhibiting a simplex, it's just a
+//     0-simplex.
+//
+//     All of this is to say, (2) boils down to providing a parameterized
+//     type taking a list symbols (for each 0-, 1-, etc... simplices involved)
+//     and producing some simplicial set with the new simplices of interest.
+//
+//     Then, "verifying" the semantics is just confirming that all generated
+//     symbols are valid, according to the specification.
+//
 // (1) is perhaps initially easier to implement, but runs into the same
 // enumeration problem at higher simplices that we are facing currently.
 //
@@ -73,7 +100,8 @@ namespace simpsets {
 template <typename s>
 concept _Symbol = (requires {
   // The unique tag --- note that
-  s::tag;
+  requires(std::same_as<std::remove_const_t<decltype(s::tag)>,
+                        typename s::TagType>);
 
   // The arity of its arguments
   { s::arity } -> std::same_as<const size_t>;
@@ -140,8 +168,10 @@ struct are_symbols<> {
 
 // Implements `_Symbol`
 template <typename T, T _tag, typename... _args>
-requires(details::boolevals::symbols::template are_symbols<_args...>::
-             value) struct Symbol {
+requires(details::boolevals::symbols::template are_symbols<
+         _args...>::value) struct Symbol {
+  using TagType = T;
+
   static constexpr T tag = _tag;
 
   static constexpr size_t arity = sizeof...(_args);
@@ -153,17 +183,14 @@ requires(details::boolevals::symbols::template are_symbols<_args...>::
 
   template <typename new_arg0, typename... new_args>
   struct detailsappendtype {
-    using symbol = typename Symbol<T,
-                                   tag,
-                                   _args...,
-                                   typename new_arg0::type::symbol>::
-        template detailsappendtype<new_args...>::symbol;
+    using symbol =
+        typename Symbol<T, tag, _args..., typename new_arg0::type::symbol>::
+            template detailsappendtype<new_args...>::symbol;
   };
 
   template <typename new_arg0>
   struct detailsappendtype<new_arg0> {
-    using symbol =
-        Symbol<T, tag, _args..., typename new_arg0::type::symbol>;
+    using symbol = Symbol<T, tag, _args..., typename new_arg0::type::symbol>;
   };
 
   // helper function to apply new args' `::type::symbol` to a tag.
@@ -185,6 +212,8 @@ requires(details::boolevals::symbols::template are_symbols<_args...>::
 // Base case.
 template <typename T, T _tag>
 struct Symbol<T, _tag> {
+  using TagType = T;
+
   static constexpr T tag = _tag;
 
   static constexpr size_t arity = 0;
@@ -195,9 +224,8 @@ struct Symbol<T, _tag> {
 
   template <typename new_arg0, typename... new_args>
   struct detailsappendtype {
-    using symbol =
-        typename Symbol<T, tag, typename new_arg0::type::symbol>::
-            template detailsappendtype<new_args...>::symbol;
+    using symbol = typename Symbol<T, tag, typename new_arg0::type::symbol>::
+        template detailsappendtype<new_args...>::symbol;
   };
 
   template <typename new_arg0>
@@ -364,9 +392,7 @@ struct dimension {
 }  // namespace details::boolevals::simplicial::faces
 
 // Implements _Simplex<sizeof...(faces) + 1>.
-template <_Symbol _symbol,
-          size_t n,
-          typename... faces>
+template <_Symbol _symbol, size_t n, typename... faces>
 requires(details::boolevals::simplicial::faces::dimension<n, faces...>::value&&
              details::boolevals::simplicial::faces::
                  form_simplex<n, true, faces...>::value) struct Simplex {
@@ -415,19 +441,45 @@ using test2 = RequiresSimplex<2, DS2>;
 using S0_1 = SimplexST<SymbolST<1>, 0>;
 using S0_2 = SimplexST<SymbolST<2>, 0>;
 
-using S1_0 = SimplexST<SymbolST<0>, 1, S0_1, S0_2>;
-using S1_1 = SimplexST<SymbolST<1>, 1, S0_0, S0_2>;
-using S1_2 = SimplexST<SymbolST<2>, 1, S0_0, S0_1>;
+using S1_0 = SimplexST<SymbolST<12>, 1, S0_1, S0_2>;
+using S1_1 = SimplexST<SymbolST<02>, 1, S0_0, S0_2>;
+using S1_2 = SimplexST<SymbolST<01>, 1, S0_0, S0_1>;
 
 // this is a standard 2-simplex
-using S2 = SimplexST<SymbolST<0>, 2, S1_2, S1_1, S1_0>;
+using S2 = SimplexST<SymbolST<012>, 2, S1_2, S1_1, S1_0>;
 
 };  // namespace tests::simplex
 
 //// now we can get into the simplicial sets.
-///  i.e. we now need to keep track of the annoying available symbols.
 
-// template <size_t _dim
+// template <typename F>
+// concept _Formation = requires {
+//   // it'd be nice if we could do this, but apparently not...
+//   F::template materialize<auto>;
+// };
+
+// template <size_t _arity, typename F>
+// concept _Formation = requires {
+//   // this would also maybe be nice...
+//   F::template materialize<_Symbol...>;
+// };
+
+// template <typename s>
+// concept _SimplicialSet = requires {
+//   // test for membership
+//   s:template is_member<typename>;
+//
+//   // again, not ideal but would want:
+//   // typename SS::template is_member<_Symbol>;
+//
+//   // this would be nice, but oh well
+//   // { SS::is_member<_Symbol>::value } -> std::same_as<const bool>;
+// };
+
+//// it seems like there's less and less we can enforce with `concept`s
+//// alone at this point, so now we'll just make some helpers?
+
+namespace tests::formation {}
 
 }  // namespace simpsets
 
