@@ -207,6 +207,9 @@ requires(details::boolevals::symbols::template are_symbols<
       using symbol = Symbol<T, _tag, _args...>;
     };
   };
+
+  template <T _new_tag>
+  using retag = Symbol<T, _new_tag, _args...>;
 };
 
 // Base case.
@@ -624,22 +627,6 @@ struct are_simplices<> {
 
 namespace details::simplicial {
 
-template <template <typename...> typename constructor,
-          template <size_t>
-          typename accessor,
-          size_t N,
-          typename = std::make_index_sequence<N>>
-struct build;
-
-template <template <typename...> typename constructor,
-          template <size_t>
-          typename accessor,
-          size_t N,
-          size_t... S>
-struct build<constructor, accessor, N, std::index_sequence<S...>> {
-  using type = typename constructor<typename accessor<S>::type...>::type;
-};
-
 template <size_t n, typename simplex, template <_Symbol> typename labeler>
 struct relabel_impl {
   template <_Symbol _symbol, typename... new_faces>
@@ -768,7 +755,8 @@ struct OpSimplex<0, simplex> {
 
 // I think we don't need to use `OpSimplex` to find the correct symbol, since
 // the simplicial identities imply that any labels should be consistent
-// across... not sure, need to think on it.
+// across... don't have a formal proof of the fact, but empirically it seems
+// to work for simplices. Maybe not for simplicial sets or degenerates....
 
 template <size_t n, typename simplex>
 struct op_impl {
@@ -848,9 +836,9 @@ requires(
 
 namespace tests::simplex {
 
-static_assert(std::same_as<S0_0, op<S0_0>>);
-
 // try opposite
+
+static_assert(std::same_as<S0_0, op<S0_0>>);
 
 using opS1_0 = op<S1_0>;
 static_assert(std::same_as<SimplexST<SymbolST<12>, 1, S0_2, S0_1>, opS1_0>);
@@ -859,6 +847,102 @@ using opS2 = op<S2>;  // OpSimplex<2, S2>;
 using test4 = RequiresSimplex<2, opS2>;
 
 }  // namespace tests::simplex
+
+//// now (co)cones
+
+namespace details::simplicial {
+
+template <_Symbol cone_sym,
+          typename simplex,
+          size_t N,
+          typename = std::make_index_sequence<N>>
+struct cone_impl;
+
+template <_Symbol cone_sym, typename simplex, size_t N, size_t... S>
+struct cone_impl<cone_sym, simplex, N, std::index_sequence<S...>> {
+  template <size_t i>
+  struct new_face {
+    using type = typename cone_impl<cone_sym,
+                                    typename simplex::template face<i>::type,
+                                    simplex::dim>::type;
+  };
+
+  using type = Simplex<cone_sym,
+                       simplex::dim + 1,
+                       typename new_face<S>::type...,
+                       simplex>;
+};
+
+// Base case N = 1:
+
+template <_Symbol cone_sym, typename simplex>
+struct cone_impl<cone_sym, simplex, 1, std::index_sequence<0>> {
+  using type =
+      Simplex<cone_sym, simplex::dim + 1, Simplex<cone_sym, 0>, simplex>;
+};
+
+}  // namespace details::simplicial
+
+template <_Symbol cone_sym, typename simplex>
+using cone = typename details::simplicial::
+    cone_impl<cone_sym, simplex, simplex::dim + 1>::type;
+
+namespace details::simplicial {
+
+template <_Symbol cone_sym,
+          typename simplex,
+          size_t N,
+          typename = std::make_index_sequence<N>>
+struct cocone_impl;
+
+template <_Symbol cone_sym, typename simplex, size_t N, size_t... S>
+struct cocone_impl<cone_sym, simplex, N, std::index_sequence<S...>> {
+  template <size_t i>
+  struct new_face {
+    using type = typename cocone_impl<cone_sym,
+                                    typename simplex::template face<i>::type,
+                                    simplex::dim>::type;
+  };
+
+  using type = Simplex<cone_sym,
+                       simplex::dim + 1,
+                       simplex,
+                       typename new_face<S>::type...>;
+};
+
+// Base case N = 1:
+
+template <_Symbol cone_sym, typename simplex>
+struct cocone_impl<cone_sym, simplex, 1, std::index_sequence<0>> {
+  using type =
+      Simplex<cone_sym, simplex::dim + 1, simplex, Simplex<cone_sym, 0>>;
+};
+
+}  // namespace details::simplicial
+
+template <_Symbol cone_sym, typename simplex>
+using cocone = typename details::simplicial::
+    cocone_impl<cone_sym, simplex, simplex::dim + 1>::type;
+
+namespace tests::simplex::cones {
+
+// base case
+static_assert(std::same_as<DS1, cone<SymbolST<0>, S0_0>>);
+static_assert(std::same_as<DS1, cocone<SymbolST<0>, S0_0>>);
+
+// iterated
+static_assert(std::same_as<DS2, cone<SymbolST<0>, DS1>>);
+static_assert(std::same_as<DS2, cocone<SymbolST<0>, DS1>>);
+
+}  // namespace tests::simplex::cones
+
+// now we'll give some examples of formation simplicial maps...
+
+namespace tests::simplex::form {
+
+// template <_Symbol
+
+}
 
 // we don't ask to specifically enumerate all of the simplices of
 // a simplicial set, instead we adopt the convention that there are
