@@ -498,7 +498,6 @@ struct degeneracy {
 
     using type = typename constructor<face<S>...>::type;
   };
-  ;
 
   using type = typename build<simplex::dim + 2>::type;
 };
@@ -547,46 +546,6 @@ struct Simplex<_symbol, 0> {
   };
 };
 
-template <size_t n, typename simplex>
-requires(details::boolevals::simplicial::is_simplex<n, simplex>::
-             value) struct OpSimplex {
-  using This = OpSimplex<n, simplex>;
-
-  static constexpr size_t dim = n;
-
-  using symbol = typename simplex::symbol;
-
-  template <size_t i>
-  struct face {
-    using type =
-        OpSimplex<n - 1, typename simplex::template face<dim - i>::type>;
-  };
-
-  template <template <typename...> typename F>
-  using apply_faces = typename simplex::template apply_faces<F>::type;
-
-  template <size_t j>
-  struct degeneracy {
-    using type =
-        OpSimplex<n - 1, typename simplex::template degeneracy<dim - j>::type>;
-  };
-};
-
-template <typename simplex>
-struct OpSimplex<0, simplex> {
-  using This = OpSimplex<0, simplex>;
-
-  static constexpr size_t dim = 0;
-
-  using symbol = typename simplex::_symbol;
-
-  template <size_t j>
-  struct degeneracy {
-    using type =
-        OpSimplex<1, typename simplex::template degeneracy<dim - j>::type>;
-  };
-};
-
 namespace tests::simplex {
 template <size_t tag, typename... args>
 using SymbolST = Symbol<size_t, tag, args...>;
@@ -623,16 +582,18 @@ using S1_1 = SimplexST<SymbolST<02>, 1, S0_0, S0_2>;
 using S1_2 = SimplexST<SymbolST<01>, 1, S0_0, S0_1>;
 
 // this is a standard 2-simplex
-using S2 = SimplexST<SymbolST<012>, 2, S1_2, S1_1, S1_0>;
+using S2 = SimplexST<SymbolST<0x012>, 2, S1_2, S1_1, S1_0>;
 using test3 = RequiresSimplex<2, S2>;
 
 // try opposite
-using opS2 = OpSimplex<2, S2>;
-using test4 = RequiresSimplex<2, opS2>;
+// using opS2 = S2;  // OpSimplex<2, S2>;
+// using test4 = RequiresSimplex<2, opS2>;
 
 };  // namespace tests::simplex
 
 //// now we can get into the simplicial sets.
+
+// first, some helpers for determining when/whether things are simplices
 
 namespace details::boolevals::simplicial {
 
@@ -658,6 +619,246 @@ struct are_simplices<> {
 };
 
 }  // namespace details::boolevals::simplicial
+
+// now, some helpers for relabeling simplices...
+
+namespace details::simplicial {
+
+template <template <typename...> typename constructor,
+          template <size_t>
+          typename accessor,
+          size_t N,
+          typename = std::make_index_sequence<N>>
+struct build;
+
+template <template <typename...> typename constructor,
+          template <size_t>
+          typename accessor,
+          size_t N,
+          size_t... S>
+struct build<constructor, accessor, N, std::index_sequence<S...>> {
+  using type = typename constructor<typename accessor<S>::type...>::type;
+};
+
+template <size_t n, typename simplex, template <_Symbol> typename labeler>
+struct relabel_impl {
+  template <_Symbol _symbol, typename... new_faces>
+  struct sub_constructor {
+    using type = Simplex<typename labeler<_symbol>::type, n - 1, new_faces...>;
+  };
+};
+
+// technically, a simplicial map would have to respect the dimensional
+// structure (i.e. saying n-simplex to point is really n-simplex to the
+// n-fold degeneracy of the point).
+//
+// so, since the structure is duplicated throughout simplices, dependent
+// only on the `_Symbol`s, then this is really just relabeling simplices!
+//
+// But note, that for implementation details, it can be useful to know the
+// sequence of face maps applied during the application, e.g. in `op`.
+//
+
+template <template <_Symbol> typename map,
+          typename simplex,
+          size_t N,
+          typename = std::make_index_sequence<N>>
+struct apply_simplicial_map_impl;
+
+template <template <_Symbol> typename map,
+          typename simplex,
+          size_t N,
+          size_t... S>
+struct apply_simplicial_map_impl<map, simplex, N, std::index_sequence<S...>> {
+  template <size_t i>
+  struct new_face {
+    using type = typename apply_simplicial_map_impl<
+        map,
+        typename simplex::template face<i>::type,
+        simplex::dim>::type;
+  };
+
+  using type = Simplex<typename map<typename simplex::symbol>::type,
+                       simplex::dim,
+                       typename new_face<S>::type...>;
+};
+
+// Base case N = 1:
+
+template <template <_Symbol> typename map, typename simplex>
+struct apply_simplicial_map_impl<map, simplex, 1, std::index_sequence<0>> {
+  using type =
+      Simplex<typename map<typename simplex::symbol>::type, simplex::dim>;
+};
+
+}  // namespace details::simplicial
+
+template <template <_Symbol> typename map, typename simplex>
+requires(details::boolevals::simplicial::are_simplices<
+         simplex>::value) using apply_simplicial_map =
+    typename details::simplicial::
+        apply_simplicial_map_impl<map, simplex, simplex::dim + 1>::type;
+
+namespace tests::simplex::maps {
+
+template <_Symbol>
+struct BasicMap1;
+
+template <>
+struct BasicMap1<SymbolST<0>> {
+  using type = SymbolST<1>;
+};
+
+using MS0_0 = apply_simplicial_map<BasicMap1, S0_0>;
+static_assert(std::same_as<MS0_0, SimplexST<SymbolST<1>, 0>>);
+
+}  // namespace tests::simplex::maps
+
+namespace details::simplicial {
+
+template <size_t n, typename simplex>
+requires(details::boolevals::simplicial::is_simplex<n, simplex>::
+             value) struct OpSimplex {
+  using This = OpSimplex<n, simplex>;
+
+  static constexpr size_t dim = n;
+
+  using symbol = typename simplex::symbol;
+
+  template <size_t i>
+  struct face {
+    using type =
+        OpSimplex<n - 1, typename simplex::template face<dim - i>::type>;
+  };
+
+  template <template <typename...> typename F,
+            size_t N,
+            typename = std::make_index_sequence<N>>
+  struct apply_faces_impl;
+
+  template <template <typename...> typename F, size_t N, size_t... S>
+  struct apply_faces_impl<F, N, std::index_sequence<S...>> {
+    using type = typename F<typename face<S>::type...>::type;
+  };
+
+  template <template <typename...> typename F>
+  using apply_faces = typename apply_faces_impl<F, n + 1>::type;
+
+  template <size_t j>
+  struct degeneracy {
+    using type =
+        OpSimplex<n - 1, typename simplex::template degeneracy<dim - j>::type>;
+  };
+};
+
+template <typename simplex>
+struct OpSimplex<0, simplex> {
+  using This = OpSimplex<0, simplex>;
+
+  static constexpr size_t dim = 0;
+
+  using symbol = typename simplex::_symbol;
+
+  template <size_t j>
+  struct degeneracy {
+    using type =
+        OpSimplex<1, typename simplex::template degeneracy<dim - j>::type>;
+  };
+};
+
+// I think we don't need to use `OpSimplex` to find the correct symbol, since
+// the simplicial identities imply that any labels should be consistent
+// across... not sure, need to think on it.
+
+template <size_t n, typename simplex>
+struct op_impl {
+  template <_Symbol symbol, size_t i, bool match>
+  struct op_map_impl;
+
+  template <_Symbol symbol, size_t i>
+  struct op_map_impl<symbol, i, true> {
+    using type = typename simplex::template face<n - i>::type::symbol;
+  };
+
+  template <_Symbol symbol, size_t i>
+  struct op_map_impl<symbol, i, false> {
+    using type =
+        typename op_map_impl<symbol,
+                             i + 1,
+                             std::same_as<symbol,
+                                          typename simplex::template face<
+                                              i + 1>::type::symbol>>::type;
+  };
+
+  template <_Symbol symbol>
+  struct op_map_impl<symbol, n, true> {
+    using type = typename simplex::template face<0>::type::symbol;
+  };
+
+  template <_Symbol symbol>
+  struct op_map_impl<symbol, n, false> {
+    using type =
+        typename op_impl<n - 1, typename simplex::template face<0>::type>::
+            template op_map<symbol>::type;
+  };
+
+  template <_Symbol symbol>
+  struct op_map {
+    using type = typename op_map_impl<
+        symbol,
+        0,
+        std::same_as<symbol,
+                     typename simplex::template face<0>::type::symbol>>::type;
+  };
+
+  template <>
+  struct op_map<typename simplex::symbol> {
+    using type = typename simplex::symbol;
+  };
+
+  // would be nice to do this, but alas not used as not deducible...
+  // template <size_t i>
+  // struct OpMap<typename simplex::template face<i>::type::symbol> {
+  //   using type =
+  //       typename simplex::template face<simplex::dim - i>::type::symbol;
+  // };
+
+  using type = apply_simplicial_map<op_map, simplex>;
+};
+
+template <typename simplex>
+struct op_impl<0, simplex> {
+  template <_Symbol symbol>
+  struct op_map;
+
+  template <>
+  struct op_map<typename simplex::symbol> {
+    using type = typename simplex::symbol;
+  };
+
+  using type = Simplex<typename simplex::symbol, 0>;
+};
+
+}  // namespace details::simplicial
+
+template <typename simplex>
+requires(
+    details::boolevals::simplicial::are_simplices<simplex>::value) using op =
+    typename details::simplicial::op_impl<simplex::dim, simplex>::type;
+
+namespace tests::simplex {
+
+static_assert(std::same_as<S0_0, op<S0_0>>);
+
+// try opposite
+
+using opS1_0 = op<S1_0>;
+static_assert(std::same_as<SimplexST<SymbolST<12>, 1, S0_2, S0_1>, opS1_0>);
+
+using opS2 = op<S2>;  // OpSimplex<2, S2>;
+using test4 = RequiresSimplex<2, opS2>;
+
+}  // namespace tests::simplex
 
 // we don't ask to specifically enumerate all of the simplices of
 // a simplicial set, instead we adopt the convention that there are
@@ -717,6 +918,8 @@ namespace tests::formation {}
 
 int main(int argc, char* argv[]) {
   std::cout << "S2 symbols: "
+            << protos::symbolsimplex::simpsets::tests::simplex::S2::symbol::tag
+            << "("
             << protos::symbolsimplex::simpsets::tests::simplex::S2::face<
                    0>::type::symbol::tag
             << ", "
@@ -725,17 +928,20 @@ int main(int argc, char* argv[]) {
             << ", "
             << protos::symbolsimplex::simpsets::tests::simplex::S2::face<
                    2>::type::symbol::tag
-            << std::endl;
-  std::cout << "opS2 symbols: "
-            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
-                   0>::type::symbol::tag
-            << ", "
-            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
-                   1>::type::symbol::tag
-            << ", "
-            << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
-                   2>::type::symbol::tag
-            << std::endl;
+            << ")" << std::endl;
+  std::cout
+      << "opS2 symbols: "
+      << protos::symbolsimplex::simpsets::tests::simplex::opS2::symbol::tag
+      << "("
+      << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+             0>::type::symbol::tag
+      << ", "
+      << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+             1>::type::symbol::tag
+      << ", "
+      << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
+             2>::type::symbol::tag
+      << ")" << std::endl;
   std::cout << "compiled!" << std::endl;
   return 0;
 }
