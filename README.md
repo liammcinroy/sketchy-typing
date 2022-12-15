@@ -10,7 +10,7 @@ sets only.
 - [`protos::limits`](playground/protos/limits): building towards maps, limits,
 cones. Fully enumerated as in `protos::enums`, so major issues.
 
-- [`protos::limits`](playground/protos/symbolsimplex): introduction of
+- [`protos::symbolsimplex`](playground/protos/symbolsimplex): introduction of
 `_Symbol`s, better model for constructing `Simplex`es, no longer fully
 enumerable so better maps, limits, cones.
 
