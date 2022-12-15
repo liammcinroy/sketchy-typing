@@ -181,33 +181,6 @@ requires(details::boolevals::symbols::template are_symbols<
     using type = typename details::get::template at<i, _args...>::type;
   };
 
-  template <typename new_arg0, typename... new_args>
-  struct detailsappendtype {
-    using symbol =
-        typename Symbol<T, tag, _args..., typename new_arg0::type::symbol>::
-            template detailsappendtype<new_args...>::symbol;
-  };
-
-  template <typename new_arg0>
-  struct detailsappendtype<new_arg0> {
-    using symbol = Symbol<T, tag, _args..., typename new_arg0::type::symbol>;
-  };
-
-  // helper function to apply new args' `::type::symbol` to a tag.
-  template <typename... new_args>
-  struct append {
-    struct type {
-      using symbol = typename detailsappendtype<new_args...>::symbol;
-    };
-  };
-
-  template <>
-  struct append<> {
-    struct type {
-      using symbol = Symbol<T, _tag, _args...>;
-    };
-  };
-
   template <T _new_tag>
   using retag = Symbol<T, _new_tag, _args...>;
 };
@@ -884,8 +857,10 @@ struct cone_impl<cone_sym, simplex, 1, std::index_sequence<0>> {
 }  // namespace details::simplicial
 
 template <_Symbol cone_sym, typename simplex>
-using cone = typename details::simplicial::
-    cone_impl<cone_sym, simplex, simplex::dim + 1>::type;
+requires(
+    details::boolevals::simplicial::are_simplices<simplex>::value) using cone =
+    typename details::simplicial::
+        cone_impl<cone_sym, simplex, simplex::dim + 1>::type;
 
 namespace details::simplicial {
 
@@ -900,8 +875,8 @@ struct cocone_impl<cone_sym, simplex, N, std::index_sequence<S...>> {
   template <size_t i>
   struct new_face {
     using type = typename cocone_impl<cone_sym,
-                                    typename simplex::template face<i>::type,
-                                    simplex::dim>::type;
+                                      typename simplex::template face<i>::type,
+                                      simplex::dim>::type;
   };
 
   using type = Simplex<cone_sym,
@@ -921,7 +896,8 @@ struct cocone_impl<cone_sym, simplex, 1, std::index_sequence<0>> {
 }  // namespace details::simplicial
 
 template <_Symbol cone_sym, typename simplex>
-using cocone = typename details::simplicial::
+requires(details::boolevals::simplicial::are_simplices<
+         simplex>::value) using cocone = typename details::simplicial::
     cocone_impl<cone_sym, simplex, simplex::dim + 1>::type;
 
 namespace tests::simplex::cones {
@@ -937,12 +913,16 @@ static_assert(std::same_as<DS2, cocone<SymbolST<0>, DS1>>);
 }  // namespace tests::simplex::cones
 
 // now we'll give some examples of formation simplicial maps...
+// the gist of it is that we just make an appropriate (co)cone, then
+// relabel the cone point to be the formation symbol.
 
 namespace tests::simplex::form {
 
 // template <_Symbol
 
 }
+
+// now... everything we've
 
 // we don't ask to specifically enumerate all of the simplices of
 // a simplicial set, instead we adopt the convention that there are
