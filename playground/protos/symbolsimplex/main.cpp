@@ -553,12 +553,12 @@ static_assert(std::same_as<DS2, typename DS1::degeneracy<1>::type>);
 using S0_1 = SimplexST<SymbolST<1>, 0>;
 using S0_2 = SimplexST<SymbolST<2>, 0>;
 
-using S1_0 = SimplexST<SymbolST<12>, 1, S0_1, S0_2>;
-using S1_1 = SimplexST<SymbolST<02>, 1, S0_0, S0_2>;
-using S1_2 = SimplexST<SymbolST<01>, 1, S0_0, S0_1>;
+using S1_0 = SimplexST<SymbolST<0x1e2>, 1, S0_1, S0_2>;
+using S1_1 = SimplexST<SymbolST<0x0e2>, 1, S0_0, S0_2>;
+using S1_2 = SimplexST<SymbolST<0x0e1>, 1, S0_0, S0_1>;
 
 // this is a standard 2-simplex
-using S2 = SimplexST<SymbolST<0x012>, 2, S1_2, S1_1, S1_0>;
+using S2 = SimplexST<SymbolST<0x1e2e3>, 2, S1_2, S1_1, S1_0>;
 using test3 = RequiresSimplex<2, S2>;
 
 // try opposite
@@ -758,9 +758,25 @@ struct op_impl {
 
   template <_Symbol symbol>
   struct op_map_impl<symbol, n, false> {
-    using type =
-        typename op_impl<n - 1, typename simplex::template face<0>::type>::
-            template op_map<symbol>::type;
+    template <
+        size_t i,
+        typename T =
+            typename op_impl<n - 1, typename simplex::template face<i>::type>::
+                template op_map<symbol>::type>
+    struct subface_map_impl {
+      using type = T;
+    };
+
+    template <size_t i>
+    struct subface_map_impl<i, typename subface_map_impl<i + 1>::type> {};
+
+    template <>
+    struct subface_map_impl<n - 1> {};
+
+    using type = typename subface_map_impl<0>::type;
+    // typename op_impl<n - 1,
+    //                  typename simplex::template face<0>::type>::
+    //     template op_map<symbol>::type;
   };
 
   template <_Symbol symbol>
@@ -797,7 +813,7 @@ struct op_impl<0, simplex> {
     using type = typename simplex::symbol;
   };
 
-  using type = Simplex<typename simplex::symbol, 0>;
+  using type = simplex;
 };
 
 }  // namespace details::simplicial
@@ -814,11 +830,13 @@ namespace tests::simplex {
 static_assert(std::same_as<S0_0, op<S0_0>>);
 
 using opS1_0 = op<S1_0>;
-static_assert(std::same_as<SimplexST<SymbolST<12>, 1, S0_2, S0_1>, opS1_0>);
+static_assert(std::same_as<SimplexST<SymbolST<0x1e2>, 1, S0_2, S0_1>, opS1_0>);
 
 using opS2 = op<S2>;  // OpSimplex<2, S2>;
 using test4 = RequiresSimplex<2, opS2>;
 
+using opopS2 = op<opS2>;
+static_assert(std::same_as<opopS2, S2>);
 }  // namespace tests::simplex
 
 //// now (co)cones
@@ -903,12 +921,30 @@ requires(details::boolevals::simplicial::are_simplices<
 namespace tests::simplex::cones {
 
 // base case
-static_assert(std::same_as<DS1, cone<SymbolST<0>, S0_0>>);
-static_assert(std::same_as<DS1, cocone<SymbolST<0>, S0_0>>);
+static_assert(std::same_as<SimplexST<SymbolST<0>, 1, S0_0, S0_1>,
+                           cone<SymbolST<0>, S0_1>>);
+static_assert(std::same_as<SimplexST<SymbolST<1>, 1, S0_0, S0_1>,
+                           cocone<SymbolST<1>, S0_0>>);
 
 // iterated
-static_assert(std::same_as<DS2, cone<SymbolST<0>, DS1>>);
-static_assert(std::same_as<DS2, cocone<SymbolST<0>, DS1>>);
+static_assert(
+    std::same_as<SimplexST<SymbolST<0>,
+                           2,
+                           SimplexST<SymbolST<0>, 1, S0_0, S0_1>,
+                           SimplexST<SymbolST<0>, 1, S0_0, S0_2>,
+                           SimplexST<SymbolST<12>, 1, S0_1, S0_2>>,
+                 cone<SymbolST<0>, SimplexST<SymbolST<12>, 1, S0_1, S0_2>>>);
+static_assert(
+    std::same_as<SimplexST<SymbolST<2>,
+                           2,
+                           SimplexST<SymbolST<1>, 1, S0_0, S0_1>,
+                           SimplexST<SymbolST<2>, 1, S0_0, S0_2>,
+                           SimplexST<SymbolST<2>, 1, S0_1, S0_2>>,
+                 cocone<SymbolST<2>, SimplexST<SymbolST<1>, 1, S0_0, S0_1>>>);
+
+// opposites
+// static_assert(
+//     std::same_as<cone<SymbolST<4>, S2>, op<cocone<SymbolST<4>, S2>>>);
 
 }  // namespace tests::simplex::cones
 
@@ -1006,6 +1042,21 @@ int main(int argc, char* argv[]) {
       << protos::symbolsimplex::simpsets::tests::simplex::opS2::face<
              2>::type::symbol::tag
       << ")" << std::endl;
+
+  std::cout
+      << "opopS2 symbols: "
+      << protos::symbolsimplex::simpsets::tests::simplex::opopS2::symbol::tag
+      << "("
+      << protos::symbolsimplex::simpsets::tests::simplex::opopS2::face<
+             0>::type::symbol::tag
+      << ", "
+      << protos::symbolsimplex::simpsets::tests::simplex::opopS2::face<
+             1>::type::symbol::tag
+      << ", "
+      << protos::symbolsimplex::simpsets::tests::simplex::opopS2::face<
+             2>::type::symbol::tag
+      << ")" << std::endl;
+
   std::cout << "compiled!" << std::endl;
   return 0;
 }
