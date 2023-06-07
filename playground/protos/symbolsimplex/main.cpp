@@ -626,7 +626,7 @@ struct relabel_impl {
   };
 };
 
-// technically, a simplicial map would have to respect the dimensional
+// technically, a simplicial map has to respect the dimensional
 // structure (i.e. saying n-simplex to point is really n-simplex to the
 // n-fold degeneracy of the point).
 //
@@ -635,15 +635,17 @@ struct relabel_impl {
 //
 // But note, that for implementation details, it can be useful to know the
 // sequence of face maps applied during the application, e.g. in `op`.
+// Since that can lead to awkward template code, then we'll say that each
+// map is parametrized by both a `_Simplex` and a `_Symbol`.
 //
 
-template <template <_Symbol> typename map,
+template <template <typename, _Symbol> typename map,
           typename simplex,
           size_t N,
           typename = std::make_index_sequence<N>>
 struct apply_simplex_map_impl;
 
-template <template <_Symbol> typename map,
+template <template <typename, _Symbol> typename map,
           typename simplex,
           size_t N,
           size_t... S>
@@ -656,22 +658,22 @@ struct apply_simplex_map_impl<map, simplex, N, std::index_sequence<S...>> {
         simplex::dim>::type;
   };
 
-  using type = Simplex<typename map<typename simplex::symbol>::type,
+  using type = Simplex<typename map<simplex, typename simplex::symbol>::type,
                        simplex::dim,
                        typename new_face<S>::type...>;
 };
 
-// Base case N = 1:
+// Base case N = 1 (dim = 0):
 
-template <template <_Symbol> typename map, typename simplex>
+template <template <typename, _Symbol> typename map, typename simplex>
 struct apply_simplex_map_impl<map, simplex, 1, std::index_sequence<0>> {
-  using type =
-      Simplex<typename map<typename simplex::symbol>::type, simplex::dim>;
+  using type = Simplex<typename map<simplex, typename simplex::symbol>::type,
+                       simplex::dim>;
 };
 
 }  // namespace details::simplicial
 
-template <template <_Symbol> typename map, typename simplex>
+template <template <typename, _Symbol> typename map, typename simplex>
 requires(details::boolevals::simplicial::are_simplices<
          simplex>::value) using apply_simplex_map =
     typename details::simplicial::
@@ -679,11 +681,11 @@ requires(details::boolevals::simplicial::are_simplices<
 
 namespace tests::simplex::maps {
 
-template <_Symbol>
+template <typename, _Symbol>
 struct BasicMap1;
 
-template <>
-struct BasicMap1<SymbolST<0>> {
+template <typename simplex>
+struct BasicMap1<simplex, SymbolST<0>> {
   using type = SymbolST<1>;
 };
 
@@ -694,113 +696,26 @@ static_assert(std::same_as<MS0_0, SimplexST<SymbolST<1>, 0>>);
 
 namespace details::simplicial {
 
-template <size_t n, typename simplex>
-struct op_impl {
-  template <_Symbol symbol, size_t i, bool match>
-  struct op_map_impl;
+template <typename simplex, size_t N, typename = std::make_index_sequence<N>>
+struct op_impl;
 
-  template <_Symbol symbol, size_t i>
-  struct op_map_impl<symbol, i, true> {
-    using type = typename simplex::template face<n - i>::type::symbol;
+template <typename simplex, size_t N, size_t... S>
+struct op_impl<simplex, N, std::index_sequence<S...>> {
+  template <size_t i>
+  struct new_face {
+    using type = typename op_impl<
+        typename simplex::template face<simplex::dim - i>::type,
+        N - 1>::type;
   };
 
-  template <_Symbol symbol, size_t i>
-  struct op_map_impl<symbol, i, false> {
-    using type =
-        typename op_map_impl<symbol,
-                             i + 1,
-                             std::same_as<symbol,
-                                          typename simplex::template face<
-                                              i + 1>::type::symbol>>::type;
-  };
-
-  template <_Symbol symbol>
-  struct op_map_impl<symbol, n, true> {
-    using type = typename simplex::template face<0>::type::symbol;
-  };
-
-  template <_Symbol symbol>
-  struct op_map_impl<symbol, n, false> {
-    // template <typename = std::make_index_sequence<n>>
-    // struct subface_map_impl {};
-
-    // template <size_t i, size_t... S>
-    //   struct subface_map_impl<i, std::index_sequence<S...>>
-    //     typename T =
-    //         typename op_impl<n - 1, typename simplex::template
-    //         face<i>::type>::
-    //             template op_map<symbol>::type>>
-
-    template <size_t i>
-    using subface_op_map =
-        typename op_impl<n - 1, typename simplex::template face<i>::type>::
-            template op_map<symbol>;
-
-    /* template <size_t i>
-    requires(has::type<subface_map<i>>::value) struct subface_map_impl {
-      using type = typename subface_map<i>::type;
-    };
-
-    template <size_t i>
-    requires(
-        !has::type<subface_map<i>>::value &&
-        has::type<subface_map_impl<i + 1>>::value) struct subface_map_impl {
-      using type = typename subface_map_impl<i + 1>::type;
-    }; */
-
-    template <size_t, bool>
-    struct subface_map_impl {};
-
-    template <size_t i>
-    struct subface_map_impl<i, true> {
-      using type = typename subface_op_map<i>::type;
-    };
-
-    template <size_t i>
-    struct subface_map_impl<i, false> {
-      using type = typename subface_map_impl<
-          i + 1,
-          has::type<subface_op_map<i + 1>>::value>::type;
-    };
-
-    template <>
-    struct subface_map_impl<n, false> {};
-
-    template <size_t i>
-    using subface_map =
-        subface_map_impl<i, has::type<subface_op_map<i>>::value>;
-
-    using type = typename subface_map<0>::type;
-  };
-
-  template <_Symbol symbol>
-  struct op_map {
-    using type = typename op_map_impl<
-        symbol,
-        0,
-        std::same_as<symbol,
-                     typename simplex::template face<0>::type::symbol>>::type;
-  };
-
-  template <>
-  struct op_map<typename simplex::symbol> {
-    using type = typename simplex::symbol;
-  };
-
-  using type = apply_simplex_map<op_map, simplex>;
+  using type = Simplex<typename simplex::symbol,
+                       simplex::dim,
+                       typename new_face<S>::type...>;
 };
 
 template <typename simplex>
-struct op_impl<0, simplex> {
-  template <_Symbol symbol>
-  struct op_map;
-
-  template <>
-  struct op_map<typename simplex::symbol> {
-    using type = typename simplex::symbol;
-  };
-
-  using type = Simplex<typename simplex::symbol, 0>;
+struct op_impl<simplex, 1, std::index_sequence<0>> {
+  using type = simplex;
 };
 
 }  // namespace details::simplicial
@@ -808,7 +723,7 @@ struct op_impl<0, simplex> {
 template <typename simplex>
 requires(
     details::boolevals::simplicial::are_simplices<simplex>::value) using op =
-    typename details::simplicial::op_impl<simplex::dim, simplex>::type;
+    typename details::simplicial::op_impl<simplex, simplex::dim + 1>::type;
 
 namespace tests::simplex {
 
